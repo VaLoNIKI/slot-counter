@@ -1,11 +1,14 @@
 import SwiftUI
 
-/// 数える小役
+/// 数える項目（小役・ボーナス）
 enum Role: String, CaseIterable, Codable, Hashable, Identifiable {
     case bell
     case cherry
     case watermelon
     case chance
+    case grape
+    case big
+    case reg
 
     var id: String { rawValue }
 
@@ -15,6 +18,9 @@ enum Role: String, CaseIterable, Codable, Hashable, Identifiable {
         case .cherry: "チェリー"
         case .watermelon: "スイカ"
         case .chance: "チャンス目"
+        case .grape: "ブドウ"
+        case .big: "BIG"
+        case .reg: "REG"
         }
     }
 
@@ -25,6 +31,9 @@ enum Role: String, CaseIterable, Codable, Hashable, Identifiable {
         case .cherry: "チ"
         case .watermelon: "ス"
         case .chance: "目"
+        case .grape: "ブ"
+        case .big: "B"
+        case .reg: "R"
         }
     }
 
@@ -35,16 +44,53 @@ enum Role: String, CaseIterable, Codable, Hashable, Identifiable {
         case .cherry: "circle.grid.2x1.fill"
         case .watermelon: "triangle.fill"
         case .chance: "sparkles"
+        case .grape: "circle.hexagongrid.fill"
+        case .big: "7.circle.fill"
+        case .reg: "r.circle.fill"
         }
     }
 
     var color: Color {
         switch self {
         case .bell: .yellow
-        case .cherry: .red
+        case .cherry: .pink
         case .watermelon: .green
-        case .chance: .purple
+        case .chance: .orange
+        case .grape: .purple
+        case .big: .red
+        case .reg: .blue
         }
+    }
+}
+
+/// 機種プリセット
+enum Machine: String, CaseIterable, Codable, Hashable, Identifiable {
+    case generic
+    case juggler
+    case hanahana
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .generic: "汎用"
+        case .juggler: "ジャグラー"
+        case .hanahana: "ハナハナ"
+        }
+    }
+
+    /// 表示・カウントする項目（表示順）
+    var roles: [Role] {
+        switch self {
+        case .generic: [.bell, .cherry, .watermelon, .chance]
+        case .juggler: [.grape, .cherry, .big, .reg]
+        case .hanahana: [.bell, .watermelon, .big, .reg]
+        }
+    }
+
+    /// BIG と REG があり、ボーナス合算を出す機種か
+    var hasBonus: Bool {
+        roles.contains(.big) && roles.contains(.reg)
     }
 }
 

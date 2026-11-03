@@ -11,6 +11,7 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             Form {
+                machineSection
                 liveActivitySection
                 gamesSection
                 countsSection
@@ -23,30 +24,55 @@ struct ContentView: View {
                     Button("完了") { gamesFocused = false }
                 }
             }
-            .confirmationDialog("カウントと総G数をリセットしますか？", isPresented: $showResetConfirm, titleVisibility: .visible) {
+            .confirmationDialog(
+                "\(model.selectedMachine.label)のカウントと総G数をリセットしますか？",
+                isPresented: $showResetConfirm,
+                titleVisibility: .visible
+            ) {
                 Button("リセット", role: .destructive) {
-                    model.reset()
-                    gamesText = ""
+                    model.resetCurrentMachine()
+                    refreshGamesText()
                     sync()
                 }
             }
         }
         .onAppear {
-            gamesText = model.totalGames > 0 ? String(model.totalGames) : ""
+            refreshGamesText()
             activity.refresh()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 model.reloadFromDisk()
-                if !gamesFocused {
-                    gamesText = model.totalGames > 0 ? String(model.totalGames) : ""
-                }
+                if !gamesFocused { refreshGamesText() }
                 activity.refresh()
             }
         }
     }
 
     // MARK: - Sections
+
+    private var machineSection: some View {
+        Section {
+            Picker("機種", selection: Binding(
+                get: { model.selectedMachine },
+                set: { machine in
+                    gamesFocused = false
+                    model.selectMachine(machine)
+                    refreshGamesText()
+                    sync()
+                }
+            )) {
+                ForEach(Machine.allCases) { machine in
+                    Text(machine.label).tag(machine)
+                }
+            }
+            .pickerStyle(.segmented)
+        } header: {
+            Text("機種")
+        } footer: {
+            Text("カウントと総G数は機種ごとに保存されます。切り替えても消えません。")
+        }
+    }
 
     private var liveActivitySection: some View {
         Section {
@@ -83,7 +109,7 @@ struct ContentView: View {
         } header: {
             Text("ライブアクティビティ")
         } footer: {
-            Text("ロック画面の表示は確認用です。カウントはコントロール（コントロールセンター／ロック画面の左右ボタン／アクションボタン）から入力します。表示は最長8時間で終了しますが、カウントは保存されているので「再開始」で続きから表示できます。")
+            Text("ロック画面のタイルを押すと+1できます（ロック中は Face ID などで解除後に実行）。ロックしたまま入力するときはコントロール（コントロールセンター／ロック画面の左右ボタン／アクションボタン）を使います。表示は最長8時間で終了しますが、カウントは保存されているので「再開始」で続きから表示できます。")
         }
     }
 
@@ -113,8 +139,8 @@ struct ContentView: View {
     }
 
     private var countsSection: some View {
-        Section("小役（タップで+1）") {
-            ForEach(Role.allCases) { role in
+        Section("\(model.selectedMachine.label)（タップで+1）") {
+            ForEach(model.selectedMachine.roles) { role in
                 Button {
                     model.increment(role)
                     sync()
@@ -129,11 +155,20 @@ struct ContentView: View {
                         Text("\(model.count(role))回")
                             .font(.title3.bold().monospacedDigit())
                             .foregroundStyle(.primary)
-                        Text(Probability.text(games: model.totalGames, count: model.count(role)))
-                            .font(.body.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .frame(minWidth: 72, alignment: .trailing)
+                        probabilityText(count: model.count(role))
                     }
+                }
+            }
+            if let bonus = model.bonusTotal {
+                HStack {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(LinearGradient(colors: [Role.big.color, Role.reg.color], startPoint: .top, endPoint: .bottom))
+                        .frame(width: 6, height: 28)
+                    Text("ボーナス合算")
+                    Spacer()
+                    Text("\(bonus)回")
+                        .font(.title3.bold().monospacedDigit())
+                    probabilityText(count: bonus)
                 }
             }
         }
@@ -152,9 +187,26 @@ struct ContentView: View {
             Button(role: .destructive) {
                 showResetConfirm = true
             } label: {
-                Label("リセット", systemImage: "trash")
+                Label("この機種をリセット", systemImage: "trash")
+            }
+        } footer: {
+            if let last = model.current.lastAction {
+                Text("直前: \(last)")
             }
         }
+    }
+
+    // MARK: - Helpers
+
+    private func probabilityText(count: Int) -> some View {
+        Text(Probability.text(games: model.totalGames, count: count))
+            .font(.body.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .frame(minWidth: 72, alignment: .trailing)
+    }
+
+    private func refreshGamesText() {
+        gamesText = model.totalGames > 0 ? String(model.totalGames) : ""
     }
 
     private func sync() {

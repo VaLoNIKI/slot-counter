@@ -5,10 +5,13 @@ import WidgetKit
 struct SlotCounterWidgetBundle: WidgetBundle {
     var body: some Widget {
         CounterLiveActivity()
-        BellControl()
+        GrapeControl()
         CherryControl()
+        BellControl()
         WatermelonControl()
         ChanceControl()
+        BigControl()
+        RegControl()
         UndoControl()
     }
 }

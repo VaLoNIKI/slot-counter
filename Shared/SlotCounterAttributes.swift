@@ -2,19 +2,31 @@ import ActivityKit
 
 struct SlotCounterAttributes: ActivityAttributes {
     struct ContentState: Codable, Hashable {
-        /// Role.rawValue -> 回数
-        var counts: [String: Int]
-        var totalGames: Int
-        var canUndo: Bool
-        /// 直前の操作（例: "ベル +1" / "取消 ベル"）。押せたかの確認用
-        var lastAction: String?
+        struct Item: Codable, Hashable, Identifiable {
+            /// Role.rawValue
+            var roleID: String
+            var count: Int
 
-        func count(_ role: Role) -> Int {
-            counts[role.rawValue, default: 0]
+            var id: String { roleID }
+            var role: Role? { Role(rawValue: roleID) }
         }
 
+        var machineName: String
+        /// 選択中の機種の項目（表示順）
+        var items: [Item]
+        var totalGames: Int
+        var canUndo: Bool
+        /// 直前の操作（例: "ブドウ +1" / "取消 BIG"）。押せたかの確認用
+        var lastAction: String?
+        /// BIG+REG の回数（ボーナスがある機種のみ）
+        var bonusTotal: Int?
+
         var total: Int {
-            counts.values.reduce(0, +)
+            items.reduce(0) { $0 + $1.count }
+        }
+
+        func count(_ role: Role) -> Int? {
+            items.first { $0.roleID == role.rawValue }?.count
         }
     }
 }

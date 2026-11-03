@@ -2,7 +2,7 @@ import ActivityKit
 import Foundation
 import Observation
 
-/// 保存するカウントデータ
+/// 1機種ぶんのカウントデータ
 struct CounterData: Codable, Equatable {
     /// Role.rawValue -> 回数
     var counts: [String: Int] = [:]
@@ -13,9 +13,16 @@ struct CounterData: Codable, Equatable {
     var lastAction: String?
 }
 
+/// 保存ファイルの中身（機種ごとのカウント + 選択中の機種）
+struct CounterStore: Codable, Equatable {
+    var selected: Machine = .generic
+    /// Machine.rawValue -> その機種のカウント
+    var machines: [String: CounterData] = [:]
+}
+
 /// カウントの唯一の保存先。
-/// コントロールの Intent は LiveActivityIntent なのでアプリのプロセスで実行される。
-/// そのため App Groups なしでも、アプリ画面とコントロールが同じファイルを共有できる。
+/// コントロールやライブアクティビティのボタンの Intent は LiveActivityIntent なので
+/// アプリのプロセスで実行される。そのため App Groups なしでも、アプリ画面と同じファイルを共有できる。
 ///
 /// 保存先は Application Support/counter.json。保護レベルは
 /// completeFileProtectionUntilFirstUserAuthentication（再起動後の初回ロック解除以降は、
@@ -28,80 +35,117 @@ final class CounterModel {
     private static let historyLimit = 1000
     private static let legacyDefaultsKey = "counterData.v1"
 
-    private(set) var data: CounterData
+    private(set) var store: CounterStore
     /// ファイルはあるのに読めなかった（初回ロック解除前など）。
     /// この状態で書き込むとデータを空で上書きしてしまうので、読めるまで変更しない。
     private var isUnreadable = false
 
     private init() {
-        data = CounterData()
+        store = CounterStore()
         reloadFromDisk()
     }
 
-    func count(_ role: Role) -> Int {
-        data.counts[role.rawValue, default: 0]
+    // MARK: - 読み取り
+
+    var selectedMachine: Machine { store.selected }
+
+    /// 選択中の機種のデータ
+    var current: CounterData {
+        store.machines[store.selected.rawValue] ?? CounterData()
     }
 
-    var totalGames: Int { data.totalGames }
+    func count(_ role: Role) -> Int {
+        current.counts[role.rawValue, default: 0]
+    }
 
-    var canUndo: Bool { !data.history.isEmpty }
+    var totalGames: Int { current.totalGames }
+
+    var canUndo: Bool { !current.history.isEmpty }
+
+    /// BIG+REG（ボーナスがある機種のみ）
+    var bonusTotal: Int? {
+        selectedMachine.hasBonus ? count(.big) + count(.reg) : nil
+    }
+
+    // MARK: - 変更
+
+    func selectMachine(_ machine: Machine) {
+        guard ensureReadable(), machine != store.selected else { return }
+        store.selected = machine
+        save()
+    }
 
     func increment(_ role: Role) {
         guard ensureReadable() else { return }
-        data.counts[role.rawValue, default: 0] += 1
-        data.history.append(role)
-        if data.history.count > Self.historyLimit {
-            data.history.removeFirst(data.history.count - Self.historyLimit)
+        let machine = store.selected
+        guard machine.roles.contains(role) else {
+            // 今の機種に無い項目のコントロールが押された
+            updateCurrent { $0.lastAction = "\(machine.label)に\(role.label)はありません" }
+            return
         }
-        data.lastAction = "\(role.label) +1"
-        save()
+        updateCurrent { data in
+            data.counts[role.rawValue, default: 0] += 1
+            data.history.append(role)
+            if data.history.count > Self.historyLimit {
+                data.history.removeFirst(data.history.count - Self.historyLimit)
+            }
+            data.lastAction = "\(role.label) +1"
+        }
     }
 
     func undo() {
-        guard ensureReadable() else { return }
-        guard let last = data.history.popLast() else { return }
-        data.counts[last.rawValue] = max(0, data.counts[last.rawValue, default: 0] - 1)
-        data.lastAction = "取消 \(last.label)"
-        save()
+        guard ensureReadable(), canUndo else { return }
+        updateCurrent { data in
+            guard let last = data.history.popLast() else { return }
+            data.counts[last.rawValue] = max(0, data.counts[last.rawValue, default: 0] - 1)
+            data.lastAction = "取消 \(last.label)"
+        }
     }
 
     func setTotalGames(_ games: Int) {
         guard ensureReadable() else { return }
-        data.totalGames = max(0, games)
-        save()
+        updateCurrent { $0.totalGames = max(0, games) }
     }
 
-    func reset() {
-        data = CounterData()
-        isUnreadable = false
+    /// 選択中の機種のカウントと総G数だけをリセットする
+    func resetCurrentMachine() {
+        guard ensureReadable() else { return }
+        store.machines[store.selected.rawValue] = CounterData()
         save()
     }
 
     func reloadFromDisk() {
         switch Self.load() {
         case .loaded(let loaded):
-            data = loaded
+            store = loaded
             isUnreadable = false
+        case .migrated(let migrated):
+            store = migrated
+            isUnreadable = false
+            save()
         case .missing:
-            if let migrated = Self.loadLegacyDefaults() {
-                data = migrated
-                isUnreadable = false
+            isUnreadable = false
+            if let legacy = Self.loadLegacyDefaults() {
+                store = CounterStore(selected: .generic, machines: [Machine.generic.rawValue: legacy])
                 save()
                 UserDefaults.standard.removeObject(forKey: Self.legacyDefaultsKey)
-            } else {
-                isUnreadable = false
             }
         case .unreadable:
             isUnreadable = true
         }
     }
 
+    // MARK: - ライブアクティビティ
+
     var contentState: SlotCounterAttributes.ContentState {
-        .init(
-            counts: data.counts,
-            totalGames: data.totalGames,
+        let machine = selectedMachine
+        return .init(
+            machineName: machine.label,
+            items: machine.roles.map { .init(roleID: $0.rawValue, count: count($0)) },
+            totalGames: totalGames,
             canUndo: canUndo,
-            lastAction: data.lastAction
+            lastAction: current.lastAction,
+            bonusTotal: bonusTotal
         )
     }
 
@@ -116,7 +160,9 @@ final class CounterModel {
     // MARK: - Storage
 
     private enum LoadResult {
-        case loaded(CounterData)
+        case loaded(CounterStore)
+        /// 旧形式（1機種ぶんだけのファイル）を変換した
+        case migrated(CounterStore)
         case missing
         case unreadable
     }
@@ -125,13 +171,20 @@ final class CounterModel {
         URL.applicationSupportDirectory.appending(path: "counter.json")
     }
 
+    private func updateCurrent(_ change: (inout CounterData) -> Void) {
+        var data = current
+        change(&data)
+        store.machines[store.selected.rawValue] = data
+        save()
+    }
+
     private func ensureReadable() -> Bool {
         if isUnreadable { reloadFromDisk() }
         return !isUnreadable
     }
 
     private func save() {
-        guard let encoded = try? JSONEncoder().encode(data) else { return }
+        guard let encoded = try? JSONEncoder().encode(store) else { return }
         do {
             try FileManager.default.createDirectory(
                 at: URL.applicationSupportDirectory,
@@ -151,14 +204,20 @@ final class CounterModel {
         guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {
             return .missing
         }
-        guard
-            let stored = try? Data(contentsOf: url),
-            let decoded = try? JSONDecoder().decode(CounterData.self, from: stored)
-        else { return .unreadable }
-        return .loaded(decoded)
+        guard let stored = try? Data(contentsOf: url) else { return .unreadable }
+        let decoder = JSONDecoder()
+        if let decoded = try? decoder.decode(CounterStore.self, from: stored) {
+            return .loaded(decoded)
+        }
+        // 旧形式: 汎用の4項目だけを保存していた
+        if let old = try? decoder.decode(CounterData.self, from: stored) {
+            return .migrated(CounterStore(selected: .generic, machines: [Machine.generic.rawValue: old]))
+        }
+        // 読めたが中身が壊れている。読めない扱いにすると二度と書けなくなるので、新規扱いにする
+        return .missing
     }
 
-    /// 旧バージョン（UserDefaults 保存）からの引き継ぎ
+    /// さらに古いバージョン（UserDefaults 保存）からの引き継ぎ
     private static func loadLegacyDefaults() -> CounterData? {
         guard let stored = UserDefaults.standard.data(forKey: legacyDefaultsKey) else { return nil }
         return try? JSONDecoder().decode(CounterData.self, from: stored)

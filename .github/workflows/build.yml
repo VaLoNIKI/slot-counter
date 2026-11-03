@@ -4,14 +4,21 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
-    runs-on: macos-15
+    # iOS 26 SDK (AppIntent.supportedModes) が必要なので macOS 26 ランナーの Xcode 26 系を使う
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
 
       - name: Xcode version
-        run: xcodebuild -version
+        run: |
+          ls -d /Applications/Xcode*.app
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i iphoneos
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -32,7 +39,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            build 2>&1 | tee xcodebuild.log | grep -E "error:|warning: .*(Intent|Activity)|BUILD (SUCCEEDED|FAILED)" || true
+            build 2>&1 | tee xcodebuild.log | grep -E "error:|warning:|BUILD (SUCCEEDED|FAILED)" || true
           grep -q "BUILD SUCCEEDED" xcodebuild.log
 
       - name: Package IPA (Payload)
