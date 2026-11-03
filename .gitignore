@@ -6,3 +6,11 @@ out/
 *.ipa
 xcodebuild.log
 .DS_Store
+
+# 秘密情報（コミット禁止）
+*.p12
+*.p8
+*.cer
+*.mobileprovision
+*.pem
+.env
