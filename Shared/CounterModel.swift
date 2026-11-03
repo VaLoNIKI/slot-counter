@@ -149,6 +149,18 @@ final class CounterModel {
         )
     }
 
+    /// Intent 用：+1 してライブアクティビティを更新する
+    func incrementAndSync(_ role: Role) async {
+        increment(role)
+        await syncLiveActivities()
+    }
+
+    /// Intent 用：取り消してライブアクティビティを更新する
+    func undoAndSync() async {
+        undo()
+        await syncLiveActivities()
+    }
+
     /// 表示中のライブアクティビティを現在の値で更新する
     func syncLiveActivities() async {
         let state = contentState

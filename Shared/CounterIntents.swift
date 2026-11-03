@@ -5,6 +5,8 @@ import AppIntents
 // 保存とライブアクティビティの更新をその場で行える。
 // アプリを前面に出さないよう、iOS 26 以降は supportedModes = .background、
 // それより前は openAppWhenRun = false を指定する。
+// ここの Intent はコントロール／ライブアクティビティ専用で、ショートカットアプリには出さない（isDiscoverable = false）。
+// ショートカット用は App/ShortcutIntents.swift（アプリ本体だけに入れて、一覧の重複を防ぐ）。
 
 /// 選択中の機種の項目を +1 する
 struct CountRoleIntent: LiveActivityIntent {
@@ -27,9 +29,7 @@ struct CountRoleIntent: LiveActivityIntent {
 
     func perform() async throws -> some IntentResult {
         guard let role = Role(rawValue: roleID) else { return .result() }
-        let model = await CounterModel.shared
-        await model.increment(role)
-        await model.syncLiveActivities()
+        await CounterModel.shared.incrementAndSync(role)
         return .result()
     }
 }
@@ -47,9 +47,7 @@ struct UndoLastIntent: LiveActivityIntent {
     init() {}
 
     func perform() async throws -> some IntentResult {
-        let model = await CounterModel.shared
-        await model.undo()
-        await model.syncLiveActivities()
+        await CounterModel.shared.undoAndSync()
         return .result()
     }
 }
