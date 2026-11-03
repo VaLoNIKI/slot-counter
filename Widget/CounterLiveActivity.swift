@@ -1,7 +1,9 @@
 import ActivityKit
-import AppIntents
 import SwiftUI
 import WidgetKit
+
+// ライブアクティビティは表示専用。入力はコントロール（CounterControls.swift）で行う。
+// （ライブアクティビティ内のボタンはロック中は動作しないため置かない）
 
 struct CounterLiveActivity: Widget {
     var body: some WidgetConfiguration {
@@ -12,15 +14,19 @@ struct CounterLiveActivity: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Text("小役")
-                        .font(.caption.bold())
+                    Text(context.state.totalGames > 0 ? "\(context.state.totalGames)G" : "小役")
+                        .font(.caption.bold().monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    UndoButton(enabled: context.state.canUndo)
+                    if let last = context.state.lastAction {
+                        Text(last)
+                            .font(.caption.bold())
+                            .lineLimit(1)
+                    }
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    RoleButtonsRow(state: context.state)
+                    RoleTilesRow(state: context.state)
                 }
             } compactLeading: {
                 HStack(spacing: 2) {
@@ -42,7 +48,7 @@ struct CounterLiveActivity: Widget {
     }
 }
 
-/// ロック画面表示（高さ約130pt。上限の160ptに収める）
+/// ロック画面表示（高さ約120pt。上限の160ptに収める）
 struct LockScreenCounterView: View {
     let state: SlotCounterAttributes.ContentState
 
@@ -58,66 +64,55 @@ struct LockScreenCounterView: View {
                         .foregroundStyle(.white)
                 }
                 Spacer(minLength: 0)
-                UndoButton(enabled: state.canUndo)
+                if let last = state.lastAction {
+                    Text("直前: \(last)")
+                        .font(.caption.bold())
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(.white.opacity(0.18)))
+                }
             }
-            RoleButtonsRow(state: state)
+            RoleTilesRow(state: state)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
     }
 }
 
-struct RoleButtonsRow: View {
+struct RoleTilesRow: View {
     let state: SlotCounterAttributes.ContentState
 
     var body: some View {
         HStack(spacing: 6) {
             ForEach(Role.allCases) { role in
-                Button(intent: CountRoleIntent(role: role)) {
-                    VStack(spacing: 1) {
-                        Text(role.label)
-                            .font(.caption2.bold())
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.6)
-                        Text("\(state.count(role))")
-                            .font(.title2.bold().monospacedDigit())
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.5)
-                        Text(Probability.text(games: state.totalGames, count: state.count(role)))
-                            .font(.system(size: 10, weight: .medium).monospacedDigit())
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.6)
-                            .opacity(0.8)
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, minHeight: 64)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(role.color.opacity(0.4))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(role.color.opacity(0.8), lineWidth: 1)
-                    )
+                VStack(spacing: 1) {
+                    Text(role.label)
+                        .font(.caption2.bold())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                    Text("\(state.count(role))")
+                        .font(.title2.bold().monospacedDigit())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                    Text(Probability.text(games: state.totalGames, count: state.count(role)))
+                        .font(.system(size: 10, weight: .medium).monospacedDigit())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .opacity(0.8)
                 }
-                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, minHeight: 64)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(role.color.opacity(0.4))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(role.color.opacity(0.8), lineWidth: 1)
+                )
             }
         }
-    }
-}
-
-struct UndoButton: View {
-    let enabled: Bool
-
-    var body: some View {
-        Button(intent: UndoLastIntent()) {
-            Label("取消", systemImage: "arrow.uturn.backward")
-                .font(.caption.bold())
-                .foregroundStyle(.white.opacity(enabled ? 1 : 0.4))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Capsule().fill(.white.opacity(enabled ? 0.22 : 0.08)))
-        }
-        .buttonStyle(.plain)
     }
 }

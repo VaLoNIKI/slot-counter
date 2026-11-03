@@ -6,6 +6,8 @@ struct SlotCounterAttributes: ActivityAttributes {
         var counts: [String: Int]
         var totalGames: Int
         var canUndo: Bool
+        /// 直前の操作（例: "ベル +1" / "取消 ベル"）。押せたかの確認用
+        var lastAction: String?
 
         func count(_ role: Role) -> Int {
             counts[role.rawValue, default: 0]

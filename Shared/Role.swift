@@ -28,6 +28,16 @@ enum Role: String, CaseIterable, Codable, Hashable, Identifiable {
         }
     }
 
+    /// コントロール（コントロールセンター等）のアイコン
+    var symbolName: String {
+        switch self {
+        case .bell: "bell.fill"
+        case .cherry: "circle.grid.2x1.fill"
+        case .watermelon: "triangle.fill"
+        case .chance: "sparkles"
+        }
+    }
+
     var color: Color {
         switch self {
         case .bell: .yellow
