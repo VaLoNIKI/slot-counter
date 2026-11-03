@@ -1,0 +1,61 @@
+name: Build unsigned IPA
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode version
+        run: xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project SlotCounter.xcodeproj \
+            -scheme SlotCounter \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee xcodebuild.log | grep -E "error:|warning: .*(Intent|Activity)|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" xcodebuild.log
+
+      - name: Package IPA (Payload)
+        run: |
+          APP=build/Build/Products/Release-iphoneos/SlotCounter.app
+          ls -la "$APP" "$APP/PlugIns"
+          test -d "$APP/PlugIns/SlotCounterWidget.appex"
+          mkdir -p out/Payload
+          cp -R "$APP" out/Payload/
+          cd out
+          zip -qry ../SlotCounter.ipa Payload
+          cd ..
+          ls -la SlotCounter.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SlotCounter-ipa
+          path: SlotCounter.ipa
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: xcodebuild-log
+          path: xcodebuild.log
+          if-no-files-found: ignore
