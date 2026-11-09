@@ -119,12 +119,30 @@ struct RoleButtonsRow: View {
         HStack(spacing: 6) {
             ForEach(state.items) { item in
                 if let role = item.role {
-                    Button(intent: CountRoleIntent(role: role)) {
+                    RoleCountButton(role: role) {
                         RoleTile(role: role, count: item.count, totalGames: state.totalGames, height: tileHeight)
                     }
                     .buttonStyle(.plain)
                 }
             }
+        }
+    }
+}
+
+/// 小役ごとの専用 Intent（パラメータなし）で +1 するボタン
+private struct RoleCountButton<Label: View>: View {
+    let role: Role
+    @ViewBuilder let label: () -> Label
+
+    var body: some View {
+        switch role {
+        case .grape: Button(intent: GrapePlusOneIntent(), label: label)
+        case .cherry: Button(intent: CherryPlusOneIntent(), label: label)
+        case .bell: Button(intent: BellPlusOneIntent(), label: label)
+        case .watermelon: Button(intent: WatermelonPlusOneIntent(), label: label)
+        case .chance: Button(intent: ChancePlusOneIntent(), label: label)
+        case .big: Button(intent: BigPlusOneIntent(), label: label)
+        case .reg: Button(intent: RegPlusOneIntent(), label: label)
         }
     }
 }

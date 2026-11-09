@@ -10,9 +10,10 @@ enum CounterControlKind {
     static let prefix = "com.valoniki.slotcounter.control."
 }
 
-private func roleControl(_ role: Role) -> some ControlWidgetConfiguration {
+/// 小役ごとの専用 Intent（パラメータなし）を渡す
+private func roleControl<I: AppIntent>(_ role: Role, _ intent: I) -> some ControlWidgetConfiguration {
     StaticControlConfiguration(kind: CounterControlKind.prefix + role.rawValue) {
-        ControlWidgetButton(action: CountRoleIntent(role: role)) {
+        ControlWidgetButton(action: intent) {
             Label("\(role.label) +1", systemImage: role.symbolName)
         }
         .tint(role.color)
@@ -22,31 +23,31 @@ private func roleControl(_ role: Role) -> some ControlWidgetConfiguration {
 }
 
 struct GrapeControl: ControlWidget {
-    var body: some ControlWidgetConfiguration { roleControl(.grape) }
+    var body: some ControlWidgetConfiguration { roleControl(.grape, GrapePlusOneIntent()) }
 }
 
 struct CherryControl: ControlWidget {
-    var body: some ControlWidgetConfiguration { roleControl(.cherry) }
+    var body: some ControlWidgetConfiguration { roleControl(.cherry, CherryPlusOneIntent()) }
 }
 
 struct BellControl: ControlWidget {
-    var body: some ControlWidgetConfiguration { roleControl(.bell) }
+    var body: some ControlWidgetConfiguration { roleControl(.bell, BellPlusOneIntent()) }
 }
 
 struct WatermelonControl: ControlWidget {
-    var body: some ControlWidgetConfiguration { roleControl(.watermelon) }
+    var body: some ControlWidgetConfiguration { roleControl(.watermelon, WatermelonPlusOneIntent()) }
 }
 
 struct ChanceControl: ControlWidget {
-    var body: some ControlWidgetConfiguration { roleControl(.chance) }
+    var body: some ControlWidgetConfiguration { roleControl(.chance, ChancePlusOneIntent()) }
 }
 
 struct BigControl: ControlWidget {
-    var body: some ControlWidgetConfiguration { roleControl(.big) }
+    var body: some ControlWidgetConfiguration { roleControl(.big, BigPlusOneIntent()) }
 }
 
 struct RegControl: ControlWidget {
-    var body: some ControlWidgetConfiguration { roleControl(.reg) }
+    var body: some ControlWidgetConfiguration { roleControl(.reg, RegPlusOneIntent()) }
 }
 
 struct UndoControl: ControlWidget {
