@@ -20,7 +20,9 @@ import UIKit
 // 実験的：音量ボタンでも数える（音量＋ = 次の曲の割り当て、音量− = 前の曲の割り当て）。
 // 音を流している間は AVAudioSession.outputVolume の変化を受け取れる（Apple のフォーラムでの回答）。
 // 背面タップに「音量を上げる／下げる」を割り当てれば、背面タップでも数えられる。
-// 音量が端（最大・最小）だと変化が起きないので、数えるたびに画面に置いた MPVolumeView で音量を中間に戻す。
+// 数えるたびに、画面に置いた MPVolumeView で音量をユーザーの元の音量に戻す。
+// ただし元の音量が最大（最小）だと「上げる（下げる）」で変化が起きず数えられないので、そのときは1目盛り内側を基準にする。
+// 機能をオフにしたとき・止めたときは、オンにする前の音量にそのまま戻す。
 
 @MainActor
 @Observable
@@ -59,6 +61,12 @@ final class NowPlayingCounter {
     @ObservationIgnored private var volumeObservation: NSKeyValueObservation?
     /// 自分で音量を戻したときの変化を数えないための期限
     @ObservationIgnored private var ignoreVolumeUntil = Date.distantPast
+    /// 機能をオンにしたときのユーザーの音量（オフにしたら戻す）
+    @ObservationIgnored private var userVolume: Float?
+    /// 数えたあとに戻す音量（ユーザーの音量。端なら1目盛り内側）
+    @ObservationIgnored private var baseVolume: Float = 0.5
+    /// iPhone の音量の1目盛り（16段階）
+    private static let volumeStep: Float = 1.0 / 16.0
     /// 音量を戻すための MPVolumeView（実戦画面に見えない大きさで置く）
     @ObservationIgnored private weak var volumeView: MPVolumeView?
 
@@ -109,6 +117,7 @@ final class NowPlayingCounter {
     func stop() {
         volumeObservation?.invalidate()
         volumeObservation = nil
+        restoreUserVolume()
         player?.stop()
         unregisterCommands()
         if let interruptionObserver {
@@ -280,8 +289,18 @@ final class NowPlayingCounter {
     private func updateVolumeObservation() {
         volumeObservation?.invalidate()
         volumeObservation = nil
-        guard isRunning, volumeButtonsEnabled else { return }
-        resetVolume()
+        guard isRunning, volumeButtonsEnabled else {
+            restoreUserVolume()
+            return
+        }
+        let current = AVAudioSession.sharedInstance().outputVolume
+        if userVolume == nil {
+            userVolume = current
+        }
+        baseVolume = min(max(current, Self.volumeStep), 1 - Self.volumeStep)
+        if abs(baseVolume - current) > 0.001 {
+            setVolume(baseVolume)
+        }
         volumeObservation = AVAudioSession.sharedInstance().observe(\.outputVolume, options: [.old, .new]) { [weak self] _, change in
             guard let old = change.oldValue, let new = change.newValue else { return }
             Task { @MainActor in
@@ -299,16 +318,23 @@ final class NowPlayingCounter {
         } else {
             return
         }
-        resetVolume()
+        setVolume(baseVolume)
     }
 
-    /// 音量を中間（0.5）に戻す。端に張り付くと次のボタンで変化が起きないため
-    private func resetVolume() {
+    /// オンにする前の音量に戻す（オフにしたとき・止めたとき）
+    private func restoreUserVolume() {
+        guard let userVolume else { return }
+        self.userVolume = nil
+        setVolume(userVolume)
+    }
+
+    /// 音量を変える。自分で変えた分は数えないよう、少しの間は変化を無視する
+    private func setVolume(_ volume: Float) {
         guard let slider = volumeView?.subviews.compactMap({ $0 as? UISlider }).first else { return }
         ignoreVolumeUntil = Date().addingTimeInterval(0.25)
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(10))
-            slider.value = 0.5
+            slider.value = volume
         }
     }
 
