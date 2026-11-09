@@ -144,6 +144,11 @@ struct SessionDetailView: View {
                 Section("ボーナス") {
                     BonusSummaryRows(stats: stats)
                 }
+                if let estimate = stats.settingEstimate {
+                    Section("設定推測（暫定）") {
+                        SettingEstimateRows(estimate: estimate)
+                    }
+                }
                 if !stats.bonuses.isEmpty {
                     let between = stats.gamesBetweenBonuses
                     Section("ボーナス履歴") {

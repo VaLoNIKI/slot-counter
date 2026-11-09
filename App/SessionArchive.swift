@@ -10,6 +10,8 @@ enum PremiumFeature {
     case sessionHistory
     /// スペック表との比較（近い設定の表示）
     case specComparison
+    /// 設定推測
+    case settingEstimate
 }
 
 enum FeatureAccess {

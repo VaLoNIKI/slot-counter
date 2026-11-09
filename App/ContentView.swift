@@ -10,7 +10,8 @@ struct ContentView: View {
     @State private var currentText = ""
     @State private var showResetConfirm = false
     @State private var showSaveSession = false
-    @State private var bonusEntry: BonusEntry?
+    /// BIG / REG を押したときに重ねて出す選択肢（nil なら非表示）
+    @State private var bonusPicker: Role?
     @State private var editingBonus: BonusRecord?
     @FocusState private var focusedField: TotalField?
 
@@ -31,6 +32,9 @@ struct ContentView: View {
                 countsSection
                 if model.selectedMachine.hasBonus {
                     bonusSection
+                    if model.selectedMachine == .juggler, let estimate = stats.settingEstimate {
+                        settingEstimateSection(estimate)
+                    }
                     bonusHistorySection
                 }
                 actionsSection
@@ -64,13 +68,6 @@ struct ContentView: View {
                     sync()
                 }
             }
-            .sheet(item: $bonusEntry) { entry in
-                BonusEntrySheet(entry: entry, initialTotal: model.current.currentTotal) { total in
-                    model.recordBonus(entry.kind, overlap: entry.overlap, totalGames: total)
-                    refreshTotalTexts()
-                    sync()
-                }
-            }
             .sheet(item: $editingBonus) { record in
                 BonusEditSheet(
                     record: record,
@@ -100,6 +97,18 @@ struct ContentView: View {
                 }
             }
         }
+        .overlay {
+            if let kind = bonusPicker {
+                BonusPickerOverlay(kind: kind) { overlap in
+                    model.recordBonus(kind, overlap: overlap, totalGames: nil)
+                    bonusPicker = nil
+                    sync()
+                } onCancel: {
+                    bonusPicker = nil
+                }
+            }
+        }
+        .animation(nil, value: bonusPicker)
         .onAppear {
             refreshTotalTexts()
             activity.refresh()
@@ -236,47 +245,52 @@ struct ContentView: View {
 
     private var bonusSection: some View {
         Section {
-            if model.selectedMachine == .juggler {
-                Grid(horizontalSpacing: 8, verticalSpacing: 8) {
-                    GridRow {
-                        bonusButton(.big, .alone)
-                        bonusButton(.big, .cherry)
-                    }
-                    GridRow {
-                        bonusButton(.reg, .alone)
-                        bonusButton(.reg, .cherry)
-                    }
-                }
-                .padding(.vertical, 4)
-            } else {
-                HStack(spacing: 8) {
-                    bonusButton(.big, nil)
-                    bonusButton(.reg, nil)
-                }
-                .padding(.vertical, 4)
+            HStack(spacing: 8) {
+                bonusButton(.big)
+                bonusButton(.reg)
             }
+            .padding(.vertical, 4)
             BonusSummaryRows(stats: stats)
         } header: {
             Text("ボーナス（ボタンで記録）")
         } footer: {
             if model.selectedMachine == .juggler {
-                Text("「付近」はスペック表で一番近い設定です（設定推測ではありません）。G数が少ないうちは大きくぶれます。ロック画面やコントロールから記録したボーナスは重複「不明」になるので、下の履歴をタップして直せます。")
+                Text("BIG / REG を押すと「単独・チェリー・判別不能」が出ます。当選時の総回転数は記録しないので、ボーナス間G数が欲しいときは下の履歴をタップして入れてください。「付近」はスペック表で一番近い設定です。")
             }
         }
     }
 
-    private func bonusButton(_ kind: Role, _ overlap: BonusOverlap?) -> some View {
-        let entry = BonusEntry(kind: kind, overlap: overlap)
-        return Button {
+    private func bonusButton(_ kind: Role) -> some View {
+        Button {
             focusedField = nil
-            bonusEntry = entry
+            if model.selectedMachine == .juggler {
+                // アニメーションなしで、その場に選択肢を重ねて出す
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    bonusPicker = kind
+                }
+            } else {
+                model.recordBonus(kind, overlap: nil, totalGames: nil)
+                sync()
+            }
         } label: {
-            Text(entry.title)
-                .bold()
-                .frame(maxWidth: .infinity, minHeight: 36)
+            Text(kind.label)
+                .font(.title3.bold())
+                .frame(maxWidth: .infinity, minHeight: 44)
         }
         .buttonStyle(.borderedProminent)
         .tint(kind.color)
+    }
+
+    private func settingEstimateSection(_ estimate: SettingEstimate) -> some View {
+        Section {
+            SettingEstimateRows(estimate: estimate)
+        } header: {
+            Text("設定推測（暫定）")
+        } footer: {
+            Text("\(model.jugglerModel.label)のスペック表の \(estimate.usedMetrics.joined(separator: "・")) の確率から計算した目安です（どの設定も最初は同じ確率として計算）。G数が少ないうちはあてになりません。ぶどうは1回以上数えているときだけ使います。")
+        }
     }
 
     @ViewBuilder

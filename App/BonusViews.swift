@@ -1,65 +1,88 @@
 import SwiftUI
 
-/// ボーナスを記録するときに開くシート（当選時の総回転数を入れる）
-struct BonusEntry: Identifiable {
-    let id = UUID()
+/// BIG / REG を押したときに、その場に重ねて出す選択肢（アニメーションなし）。
+/// 単独・チェリー重複・判別不能から選ぶ。
+struct BonusPickerOverlay: View {
     let kind: Role
-    let overlap: BonusOverlap?
+    let onPick: (BonusOverlap) -> Void
+    let onCancel: () -> Void
 
-    var title: String {
-        if let overlap { return "\(overlap.label)\(kind.label)" }
-        return kind.label
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.45)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onCancel)
+
+            VStack(spacing: 10) {
+                Text(kind.label)
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                choice("単独\(kind.label)", .alone, prominent: true)
+                choice("チェリー\(kind.label)", .cherry, prominent: true)
+                choice("判別不能", .unknown, prominent: false)
+                Button("キャンセル", action: onCancel)
+                    .padding(.top, 4)
+            }
+            .padding(20)
+            .frame(maxWidth: 320)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .padding(.horizontal, 32)
+        }
+        .transition(.identity)
+    }
+
+    private func choice(_ title: String, _ overlap: BonusOverlap, prominent: Bool) -> some View {
+        Button {
+            onPick(overlap)
+        } label: {
+            Text(title)
+                .font(.title3.bold())
+                .frame(maxWidth: .infinity, minHeight: 52)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(prominent ? kind.color : .gray)
     }
 }
 
-struct BonusEntrySheet: View {
-    let entry: BonusEntry
-    let initialTotal: Int?
-    let onRecord: (Int?) -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var totalText = ""
-    @FocusState private var focused: Bool
+/// 設定推測（暫定）の表示行
+struct SettingEstimateRows: View {
+    let estimate: SettingEstimate
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("例: 2345", text: $totalText)
-                        .keyboardType(.numberPad)
-                        .focused($focused)
-                        .font(.title2.monospacedDigit())
-                } header: {
-                    Text("当選時の総回転数（データカウンター）")
-                } footer: {
-                    Text("空欄でも記録できます。入れると、ボーナス間のG数とハマりが出ます。")
-                }
-                Section {
-                    Button {
-                        onRecord(Int(totalText.filter(\.isNumber)))
-                        dismiss()
-                    } label: {
-                        Text("\(entry.title)を記録")
-                            .frame(maxWidth: .infinity)
-                            .bold()
+        let best = estimate.mostLikely
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("暫定 設定\(best)")
+                    .font(.title2.bold())
+                Text("平均 \(String(format: "%.1f", estimate.average)) ・ 設定4以上 \(Self.percent(estimate.atLeast(4)))")
+                    .font(.footnote.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        ForEach(Array(estimate.probabilities.enumerated()), id: \.offset) { index, probability in
+            HStack(spacing: 8) {
+                Text("設定\(index + 1)")
+                    .font(.callout.monospacedDigit())
+                    .frame(width: 52, alignment: .leading)
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.secondary.opacity(0.15))
+                        Capsule()
+                            .fill(index + 1 == best ? Color.accentColor : Color.secondary.opacity(0.6))
+                            .frame(width: max(2, proxy.size.width * probability))
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(entry.kind.color)
                 }
-            }
-            .navigationTitle(entry.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("キャンセル") { dismiss() }
-                }
+                .frame(height: 10)
+                Text(Self.percent(probability))
+                    .font(.callout.monospacedDigit())
+                    .frame(width: 52, alignment: .trailing)
             }
         }
-        .onAppear {
-            totalText = initialTotal.map(String.init) ?? ""
-            focused = true
-        }
-        .presentationDetents([.medium])
+    }
+
+    static func percent(_ value: Double) -> String {
+        String(format: "%.0f%%", value * 100)
     }
 }
 

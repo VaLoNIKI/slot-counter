@@ -73,10 +73,16 @@ struct CounterData: Codable, Equatable {
         return totalGames
     }
 
-    /// 最後のボーナス（なければ打ち始め）からのG数。総回転数が分からなければ nil
+    /// 最後のボーナス（なければ打ち始め）からのG数。
+    /// 最後のボーナスの総回転数が分からないときは、古いボーナスから数えると誤るので nil
     var sinceLastBonus: Int? {
         guard let currentTotal else { return nil }
-        let base = bonuses?.last(where: { $0.totalGames != nil })?.totalGames ?? startTotal
+        let base: Int?
+        if let last = bonuses?.last {
+            base = last.totalGames
+        } else {
+            base = startTotal
+        }
         guard let base else { return nil }
         return max(0, currentTotal - base)
     }
