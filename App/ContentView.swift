@@ -1,450 +1,433 @@
 import SwiftUI
 
+/// 実戦画面（デザイン案 D）。
+/// 上：機種・直前の操作・履歴とメニュー / 帯：G数・ボーナス合算・ぶどう合算 / 設定推測 / 補足の数字
+/// 下：親指で届く大きな4つのボタンと取消。設定類はメニュー（シート）に置く。
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var model = CounterModel.shared
     @State private var activity = LiveActivityController()
     @State private var nowPlaying = NowPlayingCounter.shared
-    @State private var archive = SessionArchive.shared
-    @State private var startText = ""
-    @State private var currentText = ""
-    @State private var showResetConfirm = false
-    @State private var showSaveSession = false
     /// BIG / REG を押したときに重ねて出す選択肢（nil なら非表示）
     @State private var bonusPicker: Role?
-    @State private var editingBonus: BonusRecord?
-    @FocusState private var focusedField: TotalField?
+    @State private var showGames = false
+    @State private var showMenu = false
+    @State private var showHistory = false
+    /// 押したときの振動のきっかけ
+    @State private var tapCount = 0
 
-    private enum TotalField {
-        case start
-        case current
-    }
+    private var machine: Machine { model.selectedMachine }
 
     private var stats: PlayStats {
-        PlayStats(machine: model.selectedMachine, data: model.current)
+        PlayStats(machine: machine, data: model.current)
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                machineSection
-                gamesSection
-                countsSection
-                if model.selectedMachine.hasBonus {
-                    bonusSection
-                    if model.selectedMachine == .juggler, let estimate = stats.settingEstimate {
-                        settingEstimateSection(estimate)
-                    }
-                    bonusHistorySection
+        ZStack {
+            Theme.background.ignoresSafeArea()
+
+            VStack(spacing: 10) {
+                header
+                summaryBand
+                if machine == .juggler, let estimate = stats.settingEstimate {
+                    EstimateStrip(estimate: estimate)
                 }
-                actionsSection
-                nowPlayingSection
-                liveActivitySection
+                infoRow
+                Spacer(minLength: 0)
+                buttonGrid
+                undoButton
             }
-            .navigationTitle("小役カウンター")
-            .toolbar {
-                if FeatureAccess.isUnlocked(.sessionHistory) {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        NavigationLink {
-                            SessionListView()
-                        } label: {
-                            Label("履歴", systemImage: "clock.arrow.circlepath")
-                        }
-                    }
-                }
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("完了") { focusedField = nil }
-                }
-            }
-            .confirmationDialog(
-                "\(model.selectedMachine.label)のカウント・総回転数・ボーナス履歴をリセットしますか？",
-                isPresented: $showResetConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("リセット", role: .destructive) {
-                    model.resetCurrentMachine()
-                    refreshTotalTexts()
-                    sync()
-                }
-            }
-            .sheet(item: $editingBonus) { record in
-                BonusEditSheet(
-                    record: record,
-                    showsOverlap: model.selectedMachine == .juggler,
-                    onSave: { overlap, total in
-                        model.updateBonus(record.id, overlap: overlap, totalGames: total)
-                        sync()
-                    },
-                    onDelete: {
-                        model.deleteBonus(record.id)
-                        sync()
-                    }
-                )
-            }
-            .sheet(isPresented: $showSaveSession) {
-                SessionSaveSheet(stats: stats, initialStoreName: archive.lastStoreName) { storeName, number in
-                    archive.add(SessionRecord(
-                        savedAt: Date(),
-                        storeName: storeName,
-                        machineNumber: number,
-                        machine: model.selectedMachine,
-                        data: model.current
-                    ))
-                    model.resetCurrentMachine()
-                    refreshTotalTexts()
-                    sync()
-                }
-            }
-        }
-        .overlay {
+            .padding(.horizontal, 14)
+            .padding(.top, 6)
+            .padding(.bottom, 10)
+
             if let kind = bonusPicker {
                 BonusPickerOverlay(kind: kind) { overlap in
                     model.recordBonus(kind, overlap: overlap, totalGames: nil)
-                    bonusPicker = nil
+                    hideOverlays()
+                    tapCount += 1
                     sync()
                 } onCancel: {
-                    bonusPicker = nil
+                    hideOverlays()
                 }
             }
+
+            if showGames {
+                GamesOverlay(model: model, onChange: sync, onClose: hideOverlays)
+            }
         }
-        .animation(nil, value: bonusPicker)
+        .foregroundStyle(Theme.text)
+        .sensoryFeedback(.impact(weight: .light), trigger: tapCount)
+        .sheet(isPresented: $showMenu) {
+            MenuView(activity: activity)
+        }
+        .sheet(isPresented: $showHistory) {
+            NavigationStack {
+                SessionListView()
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("閉じる") { showHistory = false }
+                        }
+                    }
+            }
+        }
         .onAppear {
-            refreshTotalTexts()
             activity.refresh()
             nowPlaying.restoreIfNeeded()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 model.reloadFromDisk()
-                if focusedField == nil { refreshTotalTexts() }
                 activity.refresh()
             }
         }
     }
 
-    // MARK: - 機種
+    // MARK: - 上：機種と操作
 
-    private var machineSection: some View {
-        Section {
-            Picker("機種", selection: Binding(
-                get: { model.selectedMachine },
-                set: { machine in
-                    focusedField = nil
-                    model.selectMachine(machine)
-                    refreshTotalTexts()
-                    sync()
-                }
-            )) {
-                ForEach(Machine.allCases) { machine in
-                    Text(machine.label).tag(machine)
-                }
+    private var header: some View {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 2) {
+                machineMenu
+                statusLine
             }
-            .pickerStyle(.segmented)
-            if model.selectedMachine == .juggler {
-                Picker("台", selection: Binding(
-                    get: { model.jugglerModel },
-                    set: { jugglerModel in
+            Spacer(minLength: 8)
+            if FeatureAccess.isUnlocked(.sessionHistory) {
+                circleButton("clock.arrow.circlepath", label: "履歴") { showHistory = true }
+            }
+            circleButton("line.3.horizontal", label: "メニュー") { showMenu = true }
+        }
+    }
+
+    private var machineTitle: String {
+        machine == .juggler ? model.jugglerModel.label : machine.label
+    }
+
+    private var machineMenu: some View {
+        Menu {
+            Section("ジャグラー") {
+                ForEach(JugglerModel.allCases) { jugglerModel in
+                    Button {
+                        model.selectMachine(.juggler)
                         model.setJugglerModel(jugglerModel)
                         sync()
-                    }
-                )) {
-                    ForEach(JugglerModel.allCases) { jugglerModel in
-                        Text(jugglerModel.label).tag(jugglerModel)
-                    }
-                }
-                if FeatureAccess.isUnlocked(.specComparison) {
-                    NavigationLink("スペック表") {
-                        SpecTableView(model: model.jugglerModel, stats: stats)
+                    } label: {
+                        if machine == .juggler && model.jugglerModel == jugglerModel {
+                            Label(jugglerModel.label, systemImage: "checkmark")
+                        } else {
+                            Text(jugglerModel.label)
+                        }
                     }
                 }
             }
-        } header: {
-            Text("機種")
-        } footer: {
-            Text("カウントと総回転数は機種（汎用／ジャグラー／ハナハナ）ごとに保存されます。切り替えても消えません。")
-        }
-    }
-
-    // MARK: - G数
-
-    private var gamesSection: some View {
-        Section {
-            totalField("打ち始め", text: $startText, field: .start) { model.setStartTotal($0) }
-            totalField("現在", text: $currentText, field: .current) { model.setCurrentTotal($0) }
-            LabeledContent("自分のG数") {
-                Text("\(model.totalGames)G")
-                    .font(.title3.bold().monospacedDigit())
-                    .foregroundStyle(.primary)
-            }
-            if let since = model.sinceLastBonus {
-                LabeledContent("ハマり（最後のボーナスから）") {
-                    Text("\(since)G")
-                        .font(.body.bold().monospacedDigit())
-                        .foregroundStyle(.primary)
-                }
-            }
-        } header: {
-            Text("総回転数（データカウンター）")
-        } footer: {
-            Text("台のデータカウンターの総回転数を入れます。自分のG数 = 現在 − 打ち始め。確率はすべて自分のG数で計算します。")
-        }
-    }
-
-    private func totalField(
-        _ title: String,
-        text: Binding<String>,
-        field: TotalField,
-        onCommit: @escaping (Int?) -> Void
-    ) -> some View {
-        LabeledContent(title) {
-            TextField("0", text: text)
-                .keyboardType(.numberPad)
-                .multilineTextAlignment(.trailing)
-                .focused($focusedField, equals: field)
-                .font(.title3.monospacedDigit())
-                .onChange(of: text.wrappedValue) { _, newValue in
-                    let digits = newValue.filter(\.isNumber)
-                    if digits != newValue {
-                        text.wrappedValue = digits
-                        return
+            Section {
+                ForEach([Machine.hanahana, Machine.generic]) { other in
+                    Button {
+                        model.selectMachine(other)
+                        sync()
+                    } label: {
+                        if machine == other {
+                            Label(other.label, systemImage: "checkmark")
+                        } else {
+                            Text(other.label)
+                        }
                     }
-                    onCommit(digits.isEmpty ? nil : Int(digits))
-                    sync()
                 }
-        }
-    }
-
-    // MARK: - 小役
-
-    private var smallRoles: [Role] {
-        model.selectedMachine.roles.filter { !model.selectedMachine.hasBonus || ($0 != .big && $0 != .reg) }
-    }
-
-    private var countsSection: some View {
-        Section("小役（タップで+1）") {
-            ForEach(smallRoles) { role in
-                Button {
-                    model.increment(role)
-                    sync()
-                } label: {
-                    StatRow(
-                        label: role.label,
-                        color: role.color,
-                        count: model.count(role),
-                        probability: stats.probability(model.count(role)),
-                        nearest: role == .grape ? stats.nearest(.grape, count: model.count(role)) : nil
-                    )
-                    .foregroundStyle(.primary)
-                }
-            }
-        }
-    }
-
-    // MARK: - ボーナス
-
-    private var bonusSection: some View {
-        Section {
-            HStack(spacing: 8) {
-                bonusButton(.big)
-                bonusButton(.reg)
-            }
-            .padding(.vertical, 4)
-            BonusSummaryRows(stats: stats)
-        } header: {
-            Text("ボーナス（ボタンで記録）")
-        } footer: {
-            if model.selectedMachine == .juggler {
-                Text("BIG / REG を押すと「単独・チェリー・判別不能」が出ます。当選時の総回転数は記録しないので、ボーナス間G数が欲しいときは下の履歴をタップして入れてください。「付近」はスペック表で一番近い設定です。")
-            }
-        }
-    }
-
-    private func bonusButton(_ kind: Role) -> some View {
-        Button {
-            focusedField = nil
-            if model.selectedMachine == .juggler {
-                // アニメーションなしで、その場に選択肢を重ねて出す
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) {
-                    bonusPicker = kind
-                }
-            } else {
-                model.recordBonus(kind, overlap: nil, totalGames: nil)
-                sync()
             }
         } label: {
-            Text(kind.label)
-                .font(.title3.bold())
-                .frame(maxWidth: .infinity, minHeight: 44)
+            HStack(spacing: 6) {
+                Text(machineTitle)
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Theme.subtext)
+            }
+            .frame(minHeight: 28)
         }
-        .buttonStyle(.borderedProminent)
-        .tint(kind.color)
+        .accessibilityLabel("機種: \(machineTitle)")
     }
 
-    private func settingEstimateSection(_ estimate: SettingEstimate) -> some View {
-        Section {
-            SettingEstimateRows(estimate: estimate)
-        } header: {
-            Text("設定推測（暫定）")
-        } footer: {
-            Text("\(model.jugglerModel.label)のスペック表の \(estimate.usedMetrics.joined(separator: "・")) の確率から計算した目安です（どの設定も最初は同じ確率として計算）。G数が少ないうちはあてになりません。ぶどうは1回以上数えているときだけ使います。")
+    private var statusLine: some View {
+        HStack(spacing: 4) {
+            Text(model.current.lastAction.map { "直前 \($0)" } ?? "直前 なし")
+                .foregroundStyle(Theme.subtext)
+            if nowPlaying.isRunning {
+                Text("・ 再生ボタン ON")
+                    .foregroundStyle(Theme.ok)
+            }
         }
+        .font(.caption)
+        .lineLimit(1)
+    }
+
+    private func circleButton(_ systemName: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(Theme.text)
+                .frame(width: 44, height: 44)
+                .background(Theme.surface, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
+    // MARK: - 帯：G数・ボーナス合算・ぶどう合算
+
+    private var bandItems: [(label: String, value: String)] {
+        let games = stats.games
+        switch machine {
+        case .juggler:
+            return [
+                ("G数", "\(games)"),
+                ("ボーナス合算", stats.probability(stats.bonusTotal)),
+                ("ぶどう合算", stats.probability(stats.count(.grape))),
+            ]
+        case .hanahana:
+            return [
+                ("G数", "\(games)"),
+                ("ボーナス合算", stats.probability(stats.bonusTotal)),
+                ("ベル", stats.probability(stats.count(.bell))),
+            ]
+        case .generic:
+            return [
+                ("G数", "\(games)"),
+                ("ベル", stats.probability(stats.count(.bell))),
+                ("チェリー", stats.probability(stats.count(.cherry))),
+            ]
+        }
+    }
+
+    private var summaryBand: some View {
+        HStack(spacing: 1) {
+            ForEach(Array(bandItems.enumerated()), id: \.offset) { index, item in
+                let cell = VStack(spacing: 2) {
+                    Text(item.label)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.subtext)
+                    Text(item.value)
+                        .font(Theme.figure(26))
+                        .foregroundStyle(Theme.led)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                }
+                .frame(maxWidth: .infinity, minHeight: 64)
+                .padding(.horizontal, 4)
+                .background(Theme.band)
+
+                if index == 0 {
+                    // G数はタップで総回転数の入力を出す
+                    Button {
+                        showOverlay { showGames = true }
+                    } label: {
+                        cell
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("タップで総回転数を入力")
+                } else {
+                    cell
+                }
+            }
+        }
+        .background(Theme.line)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    // MARK: - 補足の数字
+
+    private var infoItems: [String] {
+        var items: [String] = []
+        if let since = model.sinceLastBonus {
+            items.append("ハマり \(since)G")
+        }
+        switch machine {
+        case .juggler:
+            items.append("BIG \(stats.probability(stats.count(.big)))")
+            items.append("REG \(stats.probability(stats.count(.reg)))")
+            items.append("単独REG \(stats.probability(stats.bonusCount(.reg, .alone)))")
+        case .hanahana:
+            items.append("BIG \(stats.probability(stats.count(.big)))")
+            items.append("REG \(stats.probability(stats.count(.reg)))")
+        case .generic:
+            break
+        }
+        return items
     }
 
     @ViewBuilder
-    private var bonusHistorySection: some View {
-        let bonuses = model.bonuses
-        if !bonuses.isEmpty {
-            let between = stats.gamesBetweenBonuses
-            Section("ボーナス履歴（新しい順・タップで編集）") {
-                ForEach(Array(bonuses.enumerated().reversed()), id: \.element.id) { index, record in
-                    Button {
-                        editingBonus = record
-                    } label: {
-                        BonusHistoryRow(number: index + 1, record: record, gamesBetween: between[record.id])
-                            .foregroundStyle(.primary)
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - 操作
-
-    private var actionsSection: some View {
-        Section {
-            Button {
-                model.undo()
-                sync()
-            } label: {
-                Label("直前を取り消す", systemImage: "arrow.uturn.backward")
-            }
-            .disabled(!model.canUndo)
-
-            if FeatureAccess.isUnlocked(.sessionHistory) {
-                Button {
-                    focusedField = nil
-                    showSaveSession = true
-                } label: {
-                    Label("実戦を保存して新しく始める", systemImage: "square.and.arrow.down")
-                }
-            }
-
-            Button(role: .destructive) {
-                showResetConfirm = true
-            } label: {
-                Label("この機種をリセット（保存しない）", systemImage: "trash")
-            }
-        } footer: {
-            if let last = model.current.lastAction {
-                Text("直前: \(last)")
-            }
-        }
-    }
-
-    // MARK: - ロック画面の再生ボタン
-
-    private var nowPlayingSection: some View {
-        Section {
-            Toggle("再生ボタンで数える", isOn: Binding(
-                get: { nowPlaying.isRunning },
-                set: { on in
-                    if on {
-                        nowPlaying.start()
-                    } else {
-                        nowPlaying.stop()
-                    }
-                }
-            ))
-            Picker("⏭ 次の曲", selection: Binding(
-                get: { model.nextTrackRole },
-                set: { role in
-                    model.setNextTrackRole(role)
-                    sync()
-                }
-            )) {
-                ForEach(model.selectedMachine.roles) { role in
-                    Text("\(role.label) +1").tag(role)
-                }
-            }
-            Picker("⏮ 前の曲", selection: Binding(
-                get: { model.previousTrackRole },
-                set: { role in
-                    model.setPreviousTrackRole(role)
-                    sync()
-                }
-            )) {
-                ForEach(model.selectedMachine.roles) { role in
-                    Text("\(role.label) +1").tag(role)
-                }
-            }
-            Picker("⏯ 再生/一時停止", selection: $nowPlaying.playPauseUndoes) {
-                Text("直前を取消").tag(true)
-                Text("何もしない").tag(false)
-            }
-            if let message = nowPlaying.errorMessage {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-            }
-        } header: {
-            Text("ロック画面の再生ボタンでカウント")
-        } footer: {
-            Text("オンにすると無音の音声を流し、ロック画面の「再生中」の枠（音楽アプリと同じ場所）の ⏮ ⏯ ⏭ ボタンでカウントできます。ロック中でも Face ID なしで押せます。曲名の欄に回数と確率が出ます。使っている間は他の音楽アプリと同時に使えません。割り当ては機種ごとに保存されます。")
-        }
-    }
-
-    // MARK: - ライブアクティビティ
-
-    private var liveActivitySection: some View {
-        Section {
+    private var infoRow: some View {
+        let items = infoItems
+        if !items.isEmpty {
             HStack {
-                Circle()
-                    .fill(activity.isRunning ? Color.green : Color.gray)
-                    .frame(width: 10, height: 10)
-                Text(activity.isRunning ? "ロック画面に表示中" : "停止中")
-                Spacer()
-            }
-            HStack(spacing: 12) {
-                Button {
-                    Task { await activity.start(with: model) }
-                } label: {
-                    Text(activity.isRunning ? "再開始" : "開始")
+                ForEach(items, id: \.self) { item in
+                    Text(item)
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-
-                Button(role: .destructive) {
-                    Task { await activity.stop() }
-                } label: {
-                    Text("停止")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(!activity.isRunning)
             }
-            if let message = activity.errorMessage {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-            }
-        } header: {
-            Text("ライブアクティビティ")
-        } footer: {
-            Text("ロック画面に回数・確率・ハマりを表示します。タイルを押すと+1できます（ロック中は Face ID が必要）。表示は最長8時間で終了しますが、カウントは保存されているので「再開始」で続きから表示できます。")
+            .font(.system(size: 13).monospacedDigit())
+            .foregroundStyle(Theme.softText)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
         }
+    }
+
+    // MARK: - 下：大きな4つのボタン
+
+    private var buttonGrid: some View {
+        let roles = machine.roles
+        return VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                ForEach(roles.prefix(2)) { role in
+                    roleButton(role, numberSize: 60, minHeight: 110, maxHeight: 168)
+                }
+            }
+            HStack(spacing: 10) {
+                ForEach(roles.dropFirst(2)) { role in
+                    roleButton(role, numberSize: 44, minHeight: 88, maxHeight: 120)
+                }
+            }
+        }
+    }
+
+    private func roleButton(_ role: Role, numberSize: CGFloat, minHeight: CGFloat, maxHeight: CGFloat) -> some View {
+        Button {
+            press(role)
+        } label: {
+            VStack(spacing: 2) {
+                Text(role.label)
+                    .font(.system(size: 16, weight: .bold))
+                Text("\(model.count(role))")
+                    .font(Theme.counter(numberSize))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                Text(subtitle(for: role))
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity, minHeight: minHeight, maxHeight: maxHeight)
+            .background(role.tileColor, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(role.label) \(model.count(role))回")
+        .accessibilityHint(isBonusWithPicker(role) ? "タップで単独・チェリー・判別不能を選ぶ" : "タップで1回カウント")
+    }
+
+    /// ボタンの3行目：小役は確率、ジャグラーの BIG/REG は単独・チェリー・不明の内訳
+    private func subtitle(for role: Role) -> String {
+        if machine == .juggler && (role == .big || role == .reg) {
+            let alone = stats.bonusCount(role, .alone)
+            let cherry = stats.bonusCount(role, .cherry)
+            let unknown = stats.bonusCount(role, .unknown)
+            var text = "単独\(alone) チェ\(cherry)"
+            if unknown > 0 { text += " 不明\(unknown)" }
+            return text
+        }
+        return stats.probability(model.count(role))
+    }
+
+    private func isBonusWithPicker(_ role: Role) -> Bool {
+        machine == .juggler && (role == .big || role == .reg)
+    }
+
+    private func press(_ role: Role) {
+        if isBonusWithPicker(role) {
+            showOverlay { bonusPicker = role }
+            return
+        }
+        if machine.hasBonus && (role == .big || role == .reg) {
+            model.recordBonus(role, overlap: nil, totalGames: nil)
+        } else {
+            model.increment(role)
+        }
+        tapCount += 1
+        sync()
+    }
+
+    // MARK: - 取消
+
+    private var undoButton: some View {
+        Button {
+            model.undo()
+            tapCount += 1
+            sync()
+        } label: {
+            Label("取消", systemImage: "arrow.uturn.backward")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(model.canUndo ? Theme.text : Theme.subtext)
+                .frame(maxWidth: .infinity, minHeight: 56)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Theme.border, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .disabled(!model.canUndo)
     }
 
     // MARK: - Helpers
 
-    private func refreshTotalTexts() {
-        startText = model.current.startTotal.map(String.init) ?? ""
-        currentText = model.current.currentTotal.map(String.init) ?? ""
+    /// 重ねて出す画面はアニメーションなしで出す
+    private func showOverlay(_ change: () -> Void) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction, change)
+    }
+
+    private func hideOverlays() {
+        showOverlay {
+            bonusPicker = nil
+            showGames = false
+        }
     }
 
     private func sync() {
         Task { await model.syncLiveActivities() }
+    }
+}
+
+/// 設定推測（暫定）の帯。案 A の形：左に暫定の設定と平均・4以上、右に6本の小さな棒
+struct EstimateStrip: View {
+    let estimate: SettingEstimate
+
+    var body: some View {
+        let best = estimate.mostLikely
+        let maxProbability = estimate.probabilities.max() ?? 1
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("設定推測（暫定）")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.subtext)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("設定\(best)")
+                        .font(.system(size: 17, weight: .black))
+                    Text("平均\(String(format: "%.1f", estimate.average)) ・ 4以上 \(SettingEstimateRows.percent(estimate.atLeast(4)))")
+                        .font(.system(size: 13).monospacedDigit())
+                        .foregroundStyle(Theme.softText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+            }
+            Spacer(minLength: 0)
+            HStack(alignment: .bottom, spacing: 4) {
+                ForEach(Array(estimate.probabilities.enumerated()), id: \.offset) { index, probability in
+                    VStack(spacing: 2) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(index + 1 == best ? Theme.led : Theme.barIdle)
+                            .frame(width: 10, height: 4 + 26 * probability / max(maxProbability, 0.0001))
+                        Text("\(index + 1)")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Theme.subtext)
+                    }
+                }
+            }
+            .frame(height: 44, alignment: .bottom)
+            .accessibilityHidden(true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 }

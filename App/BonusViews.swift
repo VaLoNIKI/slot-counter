@@ -1,49 +1,5 @@
 import SwiftUI
 
-/// BIG / REG を押したときに、その場に重ねて出す選択肢（アニメーションなし）。
-/// 単独・チェリー重複・判別不能から選ぶ。
-struct BonusPickerOverlay: View {
-    let kind: Role
-    let onPick: (BonusOverlap) -> Void
-    let onCancel: () -> Void
-
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.45)
-                .ignoresSafeArea()
-                .onTapGesture(perform: onCancel)
-
-            VStack(spacing: 10) {
-                Text(kind.label)
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                choice("単独\(kind.label)", .alone, prominent: true)
-                choice("チェリー\(kind.label)", .cherry, prominent: true)
-                choice("判別不能", .unknown, prominent: false)
-                Button("キャンセル", action: onCancel)
-                    .padding(.top, 4)
-            }
-            .padding(20)
-            .frame(maxWidth: 320)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .padding(.horizontal, 32)
-        }
-        .transition(.identity)
-    }
-
-    private func choice(_ title: String, _ overlap: BonusOverlap, prominent: Bool) -> some View {
-        Button {
-            onPick(overlap)
-        } label: {
-            Text(title)
-                .font(.title3.bold())
-                .frame(maxWidth: .infinity, minHeight: 52)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(prominent ? kind.color : .gray)
-    }
-}
-
 /// 設定推測（暫定）の表示行
 struct SettingEstimateRows: View {
     let estimate: SettingEstimate

@@ -116,8 +116,9 @@ enum Probability {
     static func text(games: Int, count: Int) -> String {
         guard games > 0, count > 0 else { return "1/--" }
         let value = Double(games) / Double(count)
-        return value >= 100
-            ? String(format: "1/%.0f", value)
-            : String(format: "1/%.1f", value)
+        if value >= 100 { return String(format: "1/%.0f", value) }
+        if value >= 10 { return String(format: "1/%.1f", value) }
+        // ぶどうなど 1/10 未満は小数2桁（1/5.85 と 1/5.90 の差が設定差になるため）
+        return String(format: "1/%.2f", value)
     }
 }
