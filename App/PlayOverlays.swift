@@ -17,9 +17,9 @@ struct BonusPickerOverlay: View {
                 Text(kind.label)
                     .font(.subheadline.bold())
                     .foregroundStyle(Theme.softText)
-                choice("単独\(kind.label)", .alone, color: kind.tileColor)
-                choice("チェリー\(kind.label)", .cherry, color: kind.tileColor)
-                choice("判別不能", .unknown, color: Theme.barIdle)
+                choice("単独\(kind.label)", .alone, accent: true)
+                choice("チェリー\(kind.label)", .cherry, accent: true)
+                choice("判別不能", .unknown, accent: false)
                 Button("キャンセル", action: onCancel)
                     .font(.body)
                     .foregroundStyle(Theme.subtext)
@@ -36,15 +36,18 @@ struct BonusPickerOverlay: View {
         .transition(.identity)
     }
 
-    private func choice(_ title: String, _ overlap: BonusOverlap, color: Color) -> some View {
+    private func choice(_ title: String, _ overlap: BonusOverlap, accent: Bool) -> some View {
         Button {
             onPick(overlap)
         } label: {
             Text(title)
                 .font(.title3.weight(.black))
-                .foregroundStyle(.white)
+                .foregroundStyle(accent ? kind.tileLabel : Theme.text)
                 .frame(maxWidth: .infinity, minHeight: 56)
-                .background(color, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(accent ? kind.tileBackground : Theme.surface,
+                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(accent ? kind.tileBorder : Theme.border, lineWidth: 1))
         }
         .buttonStyle(.plain)
     }

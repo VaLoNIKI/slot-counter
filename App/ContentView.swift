@@ -300,18 +300,21 @@ struct ContentView: View {
             VStack(spacing: 2) {
                 Text(role.label)
                     .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(role.tileLabel)
                 Text("\(model.count(role))")
                     .font(Theme.counter(numberSize))
+                    .foregroundStyle(Theme.text)
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
                 Text(subtitle(for: role))
                     .font(.system(size: 13))
+                    .foregroundStyle(Theme.softText)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
-            .foregroundStyle(.white)
             .frame(maxWidth: .infinity, minHeight: minHeight, maxHeight: maxHeight)
-            .background(role.tileColor, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .background(role.tileBackground, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(role.tileBorder, lineWidth: 1))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(role.label) \(model.count(role))回")
