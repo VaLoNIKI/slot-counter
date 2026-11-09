@@ -20,6 +20,8 @@ struct SlotCounterAttributes: ActivityAttributes {
         var lastAction: String?
         /// BIG+REG の回数（ボーナスがある機種のみ）
         var bonusTotal: Int?
+        /// 最後のボーナスからのG数（総回転数を入れているときのみ）
+        var sinceLastBonus: Int?
 
         var total: Int {
             items.reduce(0) { $0 + $1.count }

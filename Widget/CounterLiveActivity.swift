@@ -87,6 +87,13 @@ struct LockScreenCounterView: View {
                         .font(.caption.bold().monospacedDigit())
                         .foregroundStyle(.white)
                 }
+                if let since = state.sinceLastBonus {
+                    Text("ハマり\(since)")
+                        .font(.caption.bold().monospacedDigit())
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
                 if let bonus = state.bonusTotal {
                     Text("合算 \(Probability.text(games: state.totalGames, count: bonus))")
                         .font(.caption.bold().monospacedDigit())

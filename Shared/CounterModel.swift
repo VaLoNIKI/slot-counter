@@ -2,25 +2,95 @@ import ActivityKit
 import Foundation
 import Observation
 
-/// 1機種ぶんのカウントデータ
+/// ボーナスの重複（ジャグラー）
+enum BonusOverlap: String, Codable, CaseIterable, Identifiable {
+    /// 単独
+    case alone
+    /// チェリー重複
+    case cherry
+    /// 区別していない（ロック画面やコントロールから記録したとき）
+    case unknown
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .alone: "単独"
+        case .cherry: "チェリー"
+        case .unknown: "不明"
+        }
+    }
+}
+
+/// 1回ぶんのボーナスの記録
+struct BonusRecord: Codable, Equatable, Identifiable {
+    var id: UUID = UUID()
+    /// .big か .reg
+    var kind: Role
+    /// 重複の区別（ジャグラーのみ。ハナハナなどは nil）
+    var overlap: BonusOverlap?
+    /// 当選時のデータカウンターの総回転数（入力しなかったら nil）
+    var totalGames: Int?
+    var date: Date = Date()
+
+    var label: String {
+        if let overlap, overlap != .unknown {
+            return "\(overlap.label)\(kind.label)"
+        }
+        return kind.label
+    }
+}
+
+/// 1機種ぶんのカウントデータ。
+/// 古い保存データも読めるよう、後から足した項目はすべて Optional にしている。
 struct CounterData: Codable, Equatable {
     /// Role.rawValue -> 回数
     var counts: [String: Int] = [:]
     /// 取り消し用の操作履歴（新しいものが末尾）
     var history: [Role] = []
+    /// 旧版の手入力の総G数。打ち始め／現在の総回転数が入っていればそちらを使う
     var totalGames: Int = 0
-    /// 直前の操作の表示用テキスト（古い保存データには無いので Optional）
+    /// 直前の操作の表示用テキスト
     var lastAction: String?
     /// ロック画面の再生ボタン（次の曲／前の曲）に割り当てた項目。nil なら機種の初期値
     var nextTrackRole: Role?
     var previousTrackRole: Role?
+    /// データカウンターの総回転数：打ち始め
+    var startTotal: Int?
+    /// データカウンターの総回転数：現在
+    var currentTotal: Int?
+    /// ボーナスの記録（古い順）
+    var bonuses: [BonusRecord]?
+    /// ジャグラーの機種
+    var jugglerModel: JugglerModel?
+
+    /// 自分が回したG数
+    var games: Int {
+        if startTotal != nil || currentTotal != nil {
+            let start = startTotal ?? 0
+            return max(0, (currentTotal ?? start) - start)
+        }
+        return totalGames
+    }
+
+    /// 最後のボーナス（なければ打ち始め）からのG数。総回転数が分からなければ nil
+    var sinceLastBonus: Int? {
+        guard let currentTotal else { return nil }
+        let base = bonuses?.last(where: { $0.totalGames != nil })?.totalGames ?? startTotal
+        guard let base else { return nil }
+        return max(0, currentTotal - base)
+    }
 }
 
 /// 保存ファイルの中身（機種ごとのカウント + 選択中の機種）
 struct CounterStore: Codable, Equatable {
+    static let currentSchemaVersion = 3
+
     var selected: Machine = .generic
     /// Machine.rawValue -> その機種のカウント
     var machines: [String: CounterData] = [:]
+    /// 保存形式の版。将来形式を変えたときの引き継ぎ用
+    var schemaVersion: Int?
 }
 
 /// カウントの唯一の保存先。
@@ -63,7 +133,19 @@ final class CounterModel {
         current.counts[role.rawValue, default: 0]
     }
 
-    var totalGames: Int { current.totalGames }
+    /// 自分が回したG数（確率の計算に使う）
+    var totalGames: Int { current.games }
+
+    /// 最後のボーナスからのG数（ハマり）
+    var sinceLastBonus: Int? { current.sinceLastBonus }
+
+    var bonuses: [BonusRecord] { current.bonuses ?? [] }
+
+    var jugglerModel: JugglerModel { current.jugglerModel ?? .defaultModel }
+
+    func bonusCount(_ kind: Role, overlap: BonusOverlap? = nil) -> Int {
+        bonuses.filter { $0.kind == kind && (overlap == nil || $0.overlap == overlap) }.count
+    }
 
     var canUndo: Bool { !current.history.isEmpty }
 
@@ -114,12 +196,61 @@ final class CounterModel {
             return
         }
         updateCurrent { data in
-            data.counts[role.rawValue, default: 0] += 1
-            data.history.append(role)
-            if data.history.count > Self.historyLimit {
-                data.history.removeFirst(data.history.count - Self.historyLimit)
+            Self.add(role, to: &data)
+            if role == .big || role == .reg {
+                // ロック画面やコントロールから押されたボーナスは、重複・G数なしで記録する（あとでアプリで直せる）
+                data.bonuses = (data.bonuses ?? []) + [
+                    BonusRecord(kind: role, overlap: machine == .juggler ? .unknown : nil, totalGames: nil)
+                ]
             }
             data.lastAction = "\(role.label) +1"
+        }
+    }
+
+    /// アプリの画面からボーナスを記録する（重複と当選時の総回転数つき）
+    func recordBonus(_ kind: Role, overlap: BonusOverlap?, totalGames: Int?) {
+        guard ensureReadable(), selectedMachine.roles.contains(kind) else { return }
+        updateCurrent { data in
+            Self.add(kind, to: &data)
+            let record = BonusRecord(kind: kind, overlap: overlap, totalGames: totalGames)
+            data.bonuses = (data.bonuses ?? []) + [record]
+            if let totalGames, totalGames > (data.currentTotal ?? 0) {
+                data.currentTotal = totalGames
+            }
+            data.lastAction = "\(record.label) +1"
+        }
+    }
+
+    /// 記録済みのボーナスの重複・総回転数を直す
+    func updateBonus(_ id: UUID, overlap: BonusOverlap?, totalGames: Int?) {
+        guard ensureReadable() else { return }
+        updateCurrent { data in
+            guard let index = data.bonuses?.firstIndex(where: { $0.id == id }) else { return }
+            data.bonuses?[index].overlap = overlap
+            data.bonuses?[index].totalGames = totalGames
+        }
+    }
+
+    /// 記録済みのボーナスを消す（回数も1減らす）
+    func deleteBonus(_ id: UUID) {
+        guard ensureReadable() else { return }
+        updateCurrent { data in
+            guard let index = data.bonuses?.firstIndex(where: { $0.id == id }),
+                  let record = data.bonuses?.remove(at: index)
+            else { return }
+            data.counts[record.kind.rawValue] = max(0, data.counts[record.kind.rawValue, default: 0] - 1)
+            if let historyIndex = data.history.lastIndex(of: record.kind) {
+                data.history.remove(at: historyIndex)
+            }
+            data.lastAction = "削除 \(record.label)"
+        }
+    }
+
+    private static func add(_ role: Role, to data: inout CounterData) {
+        data.counts[role.rawValue, default: 0] += 1
+        data.history.append(role)
+        if data.history.count > historyLimit {
+            data.history.removeFirst(data.history.count - historyLimit)
         }
     }
 
@@ -128,22 +259,39 @@ final class CounterModel {
         updateCurrent { data in
             guard let last = data.history.popLast() else { return }
             data.counts[last.rawValue] = max(0, data.counts[last.rawValue, default: 0] - 1)
+            if last == .big || last == .reg,
+               let index = data.bonuses?.lastIndex(where: { $0.kind == last }) {
+                data.bonuses?.remove(at: index)
+            }
             data.lastAction = "取消 \(last.label)"
         }
     }
 
-    func setTotalGames(_ games: Int) {
+    /// データカウンターの総回転数（打ち始め）
+    func setStartTotal(_ total: Int?) {
         guard ensureReadable() else { return }
-        updateCurrent { $0.totalGames = max(0, games) }
+        updateCurrent { $0.startTotal = total.map { max(0, $0) } }
     }
 
-    /// 選択中の機種のカウントと総G数だけをリセットする
+    /// データカウンターの総回転数（現在）
+    func setCurrentTotal(_ total: Int?) {
+        guard ensureReadable() else { return }
+        updateCurrent { $0.currentTotal = total.map { max(0, $0) } }
+    }
+
+    func setJugglerModel(_ model: JugglerModel) {
+        guard ensureReadable() else { return }
+        updateCurrent { $0.jugglerModel = model }
+    }
+
+    /// 選択中の機種のカウント・総回転数・ボーナスをリセットする（再生ボタンの割り当てと機種は残す）
     func resetCurrentMachine() {
         guard ensureReadable() else { return }
         let old = current
         var fresh = CounterData()
         fresh.nextTrackRole = old.nextTrackRole
         fresh.previousTrackRole = old.previousTrackRole
+        fresh.jugglerModel = old.jugglerModel
         store.machines[store.selected.rawValue] = fresh
         save()
     }
@@ -179,7 +327,8 @@ final class CounterModel {
             totalGames: totalGames,
             canUndo: canUndo,
             lastAction: current.lastAction,
-            bonusTotal: bonusTotal
+            bonusTotal: bonusTotal,
+            sinceLastBonus: sinceLastBonus
         )
     }
 
@@ -231,6 +380,7 @@ final class CounterModel {
     }
 
     private func save() {
+        store.schemaVersion = CounterStore.currentSchemaVersion
         guard let encoded = try? JSONEncoder().encode(store) else { return }
         do {
             try FileManager.default.createDirectory(
