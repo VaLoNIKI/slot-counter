@@ -4,6 +4,7 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var model = CounterModel.shared
     @State private var activity = LiveActivityController()
+    @State private var nowPlaying = NowPlayingCounter.shared
     @State private var gamesText = ""
     @State private var showResetConfirm = false
     @FocusState private var gamesFocused: Bool
@@ -12,6 +13,7 @@ struct ContentView: View {
         NavigationStack {
             Form {
                 machineSection
+                nowPlayingSection
                 liveActivitySection
                 gamesSection
                 countsSection
@@ -39,6 +41,7 @@ struct ContentView: View {
         .onAppear {
             refreshGamesText()
             activity.refresh()
+            nowPlaying.restoreIfNeeded()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
@@ -71,6 +74,56 @@ struct ContentView: View {
             Text("機種")
         } footer: {
             Text("カウントと総G数は機種ごとに保存されます。切り替えても消えません。")
+        }
+    }
+
+    private var nowPlayingSection: some View {
+        Section {
+            Toggle("再生ボタンで数える", isOn: Binding(
+                get: { nowPlaying.isRunning },
+                set: { on in
+                    if on {
+                        nowPlaying.start()
+                    } else {
+                        nowPlaying.stop()
+                    }
+                }
+            ))
+            Picker("⏭ 次の曲", selection: Binding(
+                get: { model.nextTrackRole },
+                set: { role in
+                    model.setNextTrackRole(role)
+                    sync()
+                }
+            )) {
+                ForEach(model.selectedMachine.roles) { role in
+                    Text("\(role.label) +1").tag(role)
+                }
+            }
+            Picker("⏮ 前の曲", selection: Binding(
+                get: { model.previousTrackRole },
+                set: { role in
+                    model.setPreviousTrackRole(role)
+                    sync()
+                }
+            )) {
+                ForEach(model.selectedMachine.roles) { role in
+                    Text("\(role.label) +1").tag(role)
+                }
+            }
+            Picker("⏯ 再生/一時停止", selection: $nowPlaying.playPauseUndoes) {
+                Text("直前を取消").tag(true)
+                Text("何もしない").tag(false)
+            }
+            if let message = nowPlaying.errorMessage {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+        } header: {
+            Text("ロック画面の再生ボタンでカウント")
+        } footer: {
+            Text("オンにすると無音の音声を流し、ロック画面の「再生中」の枠（音楽アプリと同じ場所）の ⏮ ⏯ ⏭ ボタンでカウントできます。ロック中でも Face ID なしで押せます。曲名の欄に回数と確率が出ます。使っている間は他の音楽アプリと同時に使えません。割り当ては機種ごとに保存されます。")
         }
     }
 

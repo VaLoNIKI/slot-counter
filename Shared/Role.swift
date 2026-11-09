@@ -88,6 +88,23 @@ enum Machine: String, CaseIterable, Codable, Hashable, Identifiable {
         }
     }
 
+    /// ロック画面の再生ボタン（次の曲／前の曲）に最初に割り当てる項目
+    var defaultNextTrackRole: Role {
+        switch self {
+        case .generic: .bell
+        case .juggler: .grape
+        case .hanahana: .bell
+        }
+    }
+
+    var defaultPreviousTrackRole: Role {
+        switch self {
+        case .generic: .cherry
+        case .juggler: .cherry
+        case .hanahana: .watermelon
+        }
+    }
+
     /// BIG と REG があり、ボーナス合算を出す機種か
     var hasBonus: Bool {
         roles.contains(.big) && roles.contains(.reg)

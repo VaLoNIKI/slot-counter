@@ -11,6 +11,9 @@ struct CounterData: Codable, Equatable {
     var totalGames: Int = 0
     /// 直前の操作の表示用テキスト（古い保存データには無いので Optional）
     var lastAction: String?
+    /// ロック画面の再生ボタン（次の曲／前の曲）に割り当てた項目。nil なら機種の初期値
+    var nextTrackRole: Role?
+    var previousTrackRole: Role?
 }
 
 /// 保存ファイルの中身（機種ごとのカウント + 選択中の機種）
@@ -36,6 +39,8 @@ final class CounterModel {
     private static let legacyDefaultsKey = "counterData.v1"
 
     private(set) var store: CounterStore
+    /// 値が変わったとき（syncLiveActivities のたび）に呼ばれる。再生中表示の更新に使う
+    @ObservationIgnored var onChange: (@MainActor () -> Void)?
     /// ファイルはあるのに読めなかった（初回ロック解除前など）。
     /// この状態で書き込むとデータを空で上書きしてしまうので、読めるまで変更しない。
     private var isUnreadable = false
@@ -67,7 +72,32 @@ final class CounterModel {
         selectedMachine.hasBonus ? count(.big) + count(.reg) : nil
     }
 
+    /// ロック画面の「次の曲」ボタンで +1 する項目
+    var nextTrackRole: Role {
+        validRole(current.nextTrackRole) ?? selectedMachine.defaultNextTrackRole
+    }
+
+    /// ロック画面の「前の曲」ボタンで +1 する項目
+    var previousTrackRole: Role {
+        validRole(current.previousTrackRole) ?? selectedMachine.defaultPreviousTrackRole
+    }
+
+    private func validRole(_ role: Role?) -> Role? {
+        guard let role, selectedMachine.roles.contains(role) else { return nil }
+        return role
+    }
+
     // MARK: - 変更
+
+    func setNextTrackRole(_ role: Role) {
+        guard ensureReadable() else { return }
+        updateCurrent { $0.nextTrackRole = role }
+    }
+
+    func setPreviousTrackRole(_ role: Role) {
+        guard ensureReadable() else { return }
+        updateCurrent { $0.previousTrackRole = role }
+    }
 
     func selectMachine(_ machine: Machine) {
         guard ensureReadable(), machine != store.selected else { return }
@@ -110,7 +140,11 @@ final class CounterModel {
     /// 選択中の機種のカウントと総G数だけをリセットする
     func resetCurrentMachine() {
         guard ensureReadable() else { return }
-        store.machines[store.selected.rawValue] = CounterData()
+        let old = current
+        var fresh = CounterData()
+        fresh.nextTrackRole = old.nextTrackRole
+        fresh.previousTrackRole = old.previousTrackRole
+        store.machines[store.selected.rawValue] = fresh
         save()
     }
 
@@ -163,6 +197,7 @@ final class CounterModel {
 
     /// 表示中のライブアクティビティを現在の値で更新する
     func syncLiveActivities() async {
+        onChange?()
         let state = contentState
         for activity in Activity<SlotCounterAttributes>.activities {
             await activity.update(ActivityContent(state: state, staleDate: nil))
