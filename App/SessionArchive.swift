@@ -53,10 +53,21 @@ struct PlayStats {
     /// スペック表で一番近い設定（ジャグラーのみ）
     func nearest(_ metric: SpecMetric, count: Int) -> String? {
         guard FeatureAccess.isUnlocked(.specComparison),
-              let model = jugglerModel, games > 0, count > 0
+              let model = jugglerModel, games > 0, count > 0,
+              model.hasSettingDifference(metric)
         else { return nil }
         let observed = Double(games) / Double(count)
-        return JugglerModel.settingsLabel(model.nearestSettings(metric, observed: observed))
+        let label = JugglerModel.settingsLabel(model.nearestSettings(metric, observed: observed))
+        return label.isEmpty ? nil : label
+    }
+
+    /// 小役の行に出す「設定N付近」（ぶどう・チェリーのみ。設定差がない機種は出さない）
+    func nearest(for role: Role) -> String? {
+        switch role {
+        case .grape: nearest(.grape, count: count(.grape))
+        case .cherry: nearest(.cherry, count: count(.cherry))
+        default: nil
+        }
     }
 
     /// 各ボーナスの、前のボーナス（最初は打ち始め）からのG数

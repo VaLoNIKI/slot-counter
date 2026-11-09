@@ -1,3 +1,4 @@
+import MediaPlayer
 import SwiftUI
 
 /// BIG / REG を押したときに、その場に重ねて出す選択肢（アニメーションなし）。
@@ -144,4 +145,18 @@ struct GamesOverlay: View {
         .frame(minHeight: 52)
         .background(Theme.band, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
+}
+
+/// 音量を中間に戻すための MPVolumeView。実戦画面に見えない大きさで置く
+/// （画面に置いていないと音量を変えられないため）
+struct VolumeViewHost: UIViewRepresentable {
+    func makeUIView(context: Context) -> MPVolumeView {
+        let view = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
+        view.alpha = 0.01
+        view.isUserInteractionEnabled = false
+        NowPlayingCounter.shared.attach(volumeView: view)
+        return view
+    }
+
+    func updateUIView(_ uiView: MPVolumeView, context: Context) {}
 }

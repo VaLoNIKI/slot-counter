@@ -25,6 +25,9 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
+            VolumeViewHost()
+                .frame(width: 1, height: 1)
+                .accessibilityHidden(true)
 
             VStack(spacing: 10) {
                 header

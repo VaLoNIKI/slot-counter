@@ -2,6 +2,7 @@ import AVFoundation
 import Foundation
 import MediaPlayer
 import Observation
+import UIKit
 
 // ロック画面の「再生中」コントロールでカウントする仕組み（アプリ本体のみ）。
 //
@@ -15,6 +16,11 @@ import Observation
 // - 再生/一時停止 = 直前を取消（設定で「何もしない」にもできる）
 // 曲名・アーティスト名の欄に回数と確率を表示する。
 // Info.plist の UIBackgroundModes に audio が必要。
+//
+// 実験的：音量ボタンでも数える（音量＋ = 次の曲の割り当て、音量− = 前の曲の割り当て）。
+// 音を流している間は AVAudioSession.outputVolume の変化を受け取れる（Apple のフォーラムでの回答）。
+// 背面タップに「音量を上げる／下げる」を割り当てれば、背面タップでも数えられる。
+// 音量が端（最大・最小）だと変化が起きないので、数えるたびに画面に置いた MPVolumeView で音量を中間に戻す。
 
 @MainActor
 @Observable
@@ -23,6 +29,7 @@ final class NowPlayingCounter {
 
     private static let enabledKey = "nowPlayingCounter.enabled"
     private static let playPauseUndoKey = "nowPlayingCounter.playPauseUndo"
+    private static let volumeButtonsKey = "nowPlayingCounter.volumeButtons"
 
     private enum RemoteAction {
         case next
@@ -40,6 +47,20 @@ final class NowPlayingCounter {
             updateNowPlayingInfo()
         }
     }
+
+    /// 音量ボタン（背面タップの「音量を上げる／下げる」を含む）でも数えるか（実験的）
+    var volumeButtonsEnabled: Bool = UserDefaults.standard.bool(forKey: volumeButtonsKey) {
+        didSet {
+            UserDefaults.standard.set(volumeButtonsEnabled, forKey: Self.volumeButtonsKey)
+            updateVolumeObservation()
+        }
+    }
+
+    @ObservationIgnored private var volumeObservation: NSKeyValueObservation?
+    /// 自分で音量を戻したときの変化を数えないための期限
+    @ObservationIgnored private var ignoreVolumeUntil = Date.distantPast
+    /// 音量を戻すための MPVolumeView（実戦画面に見えない大きさで置く）
+    @ObservationIgnored private weak var volumeView: MPVolumeView?
 
     @ObservationIgnored private var player: AVAudioPlayer?
     @ObservationIgnored private var commandTargets: [(MPRemoteCommand, Any)] = []
@@ -78,6 +99,7 @@ final class NowPlayingCounter {
             errorMessage = nil
             UserDefaults.standard.set(true, forKey: Self.enabledKey)
             updateNowPlayingInfo()
+            updateVolumeObservation()
         } catch {
             errorMessage = "開始できませんでした: \(error.localizedDescription)"
             isRunning = false
@@ -85,6 +107,8 @@ final class NowPlayingCounter {
     }
 
     func stop() {
+        volumeObservation?.invalidate()
+        volumeObservation = nil
         player?.stop()
         unregisterCommands()
         if let interruptionObserver {
@@ -244,6 +268,48 @@ final class NowPlayingCounter {
         player?.play()
         registerCommands()
         updateNowPlayingInfo()
+        updateVolumeObservation()
+    }
+
+    // MARK: - 音量ボタン（実験的）
+
+    func attach(volumeView: MPVolumeView) {
+        self.volumeView = volumeView
+    }
+
+    private func updateVolumeObservation() {
+        volumeObservation?.invalidate()
+        volumeObservation = nil
+        guard isRunning, volumeButtonsEnabled else { return }
+        resetVolume()
+        volumeObservation = AVAudioSession.sharedInstance().observe(\.outputVolume, options: [.old, .new]) { [weak self] _, change in
+            guard let old = change.oldValue, let new = change.newValue else { return }
+            Task { @MainActor in
+                self?.handleVolumeChange(old: old, new: new)
+            }
+        }
+    }
+
+    private func handleVolumeChange(old: Float, new: Float) {
+        guard isRunning, volumeButtonsEnabled, Date() >= ignoreVolumeUntil else { return }
+        if new > old {
+            handle(.next)
+        } else if new < old {
+            handle(.previous)
+        } else {
+            return
+        }
+        resetVolume()
+    }
+
+    /// 音量を中間（0.5）に戻す。端に張り付くと次のボタンで変化が起きないため
+    private func resetVolume() {
+        guard let slider = volumeView?.subviews.compactMap({ $0 as? UISlider }).first else { return }
+        ignoreVolumeUntil = Date().addingTimeInterval(0.25)
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(10))
+            slider.value = 0.5
+        }
     }
 
     // MARK: - 無音データ

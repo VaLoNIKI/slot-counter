@@ -167,6 +167,7 @@ struct MenuView: View {
                 Text("直前を取消").tag(true)
                 Text("何もしない").tag(false)
             }
+            Toggle("音量ボタン・背面タップでも数える（実験的）", isOn: $nowPlaying.volumeButtonsEnabled)
             if let message = nowPlaying.errorMessage {
                 Text(message)
                     .font(.footnote)
@@ -175,7 +176,9 @@ struct MenuView: View {
         } header: {
             Text("ロック画面の再生ボタンでカウント")
         } footer: {
-            Text("オンにすると無音の音声を流し、ロック画面の「再生中」の枠（音楽アプリと同じ場所）の ⏮ ⏯ ⏭ ボタンでカウントできます。ロック中でも Face ID なしで押せます。使っている間は他の音楽アプリと同時に使えません。割り当ては機種ごとに保存されます。")
+            Text("オンにすると無音の音声を流し、ロック画面の「再生中」の枠（音楽アプリと同じ場所）の ⏮ ⏯ ⏭ ボタンでカウントできます。ロック中でも Face ID なしで押せます。使っている間は他の音楽アプリと同時に使えません。割り当ては機種ごとに保存されます。
+
+音量ボタン（実験的）：音量＋で ⏭ の割り当て、音量−で ⏮ の割り当てを +1 します。設定 > アクセシビリティ > タッチ > 背面タップ で「ダブルタップ＝音量を上げる」「トリプルタップ＝音量を下げる」にすると、背面タップで数えられます。数えるたびに音量は中間に戻ります。")
         }
     }
 
@@ -286,7 +289,7 @@ struct StatsDetailView: View {
                 ForEach(model.selectedMachine.roles.filter { $0 != .big && $0 != .reg }) { role in
                     StatRow(label: role.label, color: role.color, count: stats.count(role),
                             probability: stats.probability(stats.count(role)),
-                            nearest: role == .grape ? stats.nearest(.grape, count: stats.count(role)) : nil)
+                            nearest: stats.nearest(for: role))
                 }
             }
             if model.selectedMachine.hasBonus {

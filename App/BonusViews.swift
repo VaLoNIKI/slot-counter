@@ -120,7 +120,7 @@ struct BonusSummaryRows: View {
             let aloneBig = stats.bonusCount(.big, .alone)
             let cherryBig = stats.bonusCount(.big, .cherry)
             StatRow(label: "単独REG", color: Role.reg.color, count: aloneReg,
-                    probability: stats.probability(aloneReg), nearest: nil)
+                    probability: stats.probability(aloneReg), nearest: stats.nearest(.aloneReg, count: aloneReg))
             StatRow(label: "チェリーREG", color: Role.reg.color, count: cherryReg,
                     probability: stats.probability(cherryReg), nearest: nil)
             StatRow(label: "単独BIG", color: Role.big.color, count: aloneBig,

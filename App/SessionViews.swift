@@ -137,7 +137,7 @@ struct SessionDetailView: View {
                 ForEach(session.machine.roles.filter { $0 != .big && $0 != .reg }) { role in
                     StatRow(label: role.label, color: role.color, count: stats.count(role),
                             probability: stats.probability(stats.count(role)),
-                            nearest: role == .grape ? stats.nearest(.grape, count: stats.count(role)) : nil)
+                            nearest: stats.nearest(for: role))
                 }
             }
             if session.machine.hasBonus {
@@ -171,55 +171,74 @@ struct SessionDetailView: View {
     }
 }
 
-/// ジャグラーのスペック表と、今の実測値
+/// ジャグラーのスペック表と、今の実測値（列が多いので横にスクロールできる）
 struct SpecTableView: View {
     let model: JugglerModel
     let stats: PlayStats?
 
     var body: some View {
         ScrollView {
-            Grid(alignment: .trailing, horizontalSpacing: 12, verticalSpacing: 8) {
-                GridRow {
-                    Text("設定").gridColumnAlignment(.leading)
-                    Text("BIG")
-                    Text("REG")
-                    Text("合算")
-                    Text("ぶどう")
-                    Text("機械割")
-                }
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
-                Divider()
-                ForEach(model.specs, id: \.setting) { spec in
-                    GridRow {
-                        Text("\(spec.setting)").bold().gridColumnAlignment(.leading)
-                        Text(Self.format(spec.big))
-                        Text(Self.format(spec.reg))
-                        Text(Self.format(spec.combined))
-                        Text(String(format: "%.2f", spec.grape))
-                        Text(String(format: "%.1f%%", spec.payout))
+            VStack(alignment: .leading, spacing: 12) {
+                ScrollView(.horizontal) {
+                    Grid(alignment: .trailing, horizontalSpacing: 12, verticalSpacing: 8) {
+                        GridRow {
+                            Text("設定").gridColumnAlignment(.leading)
+                            Text("BIG")
+                            Text("REG")
+                            Text("合算")
+                            Text("ぶどう")
+                            Text("チェリー")
+                            Text("単独BIG")
+                            Text("重複BIG")
+                            Text("単独REG")
+                            Text("重複REG")
+                            Text("機械割")
+                        }
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+                        Divider()
+                        ForEach(model.specs, id: \.setting) { spec in
+                            GridRow {
+                                Text("\(spec.setting)").bold().gridColumnAlignment(.leading)
+                                Text(Self.format(spec.big))
+                                Text(Self.format(spec.reg))
+                                Text(Self.format(spec.combined))
+                                Text(String(format: "%.2f", spec.grape))
+                                Text(Self.optional(spec.cherry))
+                                Text(Self.optional(spec.aloneBig, decimals: 0))
+                                Text(Self.optional(spec.cherryBig, decimals: 0))
+                                Text(Self.optional(spec.aloneReg, decimals: 0))
+                                Text(Self.optional(spec.cherryReg, decimals: 0))
+                                Text(String(format: "%.1f%%", spec.payout))
+                            }
+                            .font(.callout.monospacedDigit())
+                        }
+                        if let stats, stats.games > 0 {
+                            Divider()
+                            GridRow {
+                                Text("実測").bold().foregroundStyle(.tint).gridColumnAlignment(.leading)
+                                Text(Self.observed(stats, stats.count(.big)))
+                                Text(Self.observed(stats, stats.count(.reg)))
+                                Text(Self.observed(stats, stats.bonusTotal))
+                                Text(Self.observed(stats, stats.count(.grape), decimals: 2))
+                                Text(Self.observed(stats, stats.count(.cherry)))
+                                Text(Self.observed(stats, stats.bonusCount(.big, .alone), decimals: 0))
+                                Text(Self.observed(stats, stats.bonusCount(.big, .cherry), decimals: 0))
+                                Text(Self.observed(stats, stats.bonusCount(.reg, .alone), decimals: 0))
+                                Text(Self.observed(stats, stats.bonusCount(.reg, .cherry), decimals: 0))
+                                Text("")
+                            }
+                            .font(.callout.monospacedDigit())
+                            .foregroundStyle(.tint)
+                        }
                     }
-                    .font(.callout.monospacedDigit())
+                    .padding()
                 }
-                if let stats, stats.games > 0 {
-                    Divider()
-                    GridRow {
-                        Text("実測").bold().foregroundStyle(.tint).gridColumnAlignment(.leading)
-                        Text(Self.observed(stats, stats.count(.big)))
-                        Text(Self.observed(stats, stats.count(.reg)))
-                        Text(Self.observed(stats, stats.bonusTotal))
-                        Text(Self.observed(stats, stats.count(.grape), decimals: 2))
-                        Text("")
-                    }
-                    .font(.callout.monospacedDigit())
-                    .foregroundStyle(.tint)
-                }
+                Text("数値は 1/x の x。「-」は資料に設定別の値がない項目です。チェリーはボーナスと重ならなかったチェリー（非重複）。実測は今のG数から計算した値で、G数が少ないうちは大きくぶれます。\n出典：ジャグラースペック一覧表と各機種の詳細ページ（smokefield.info）")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
             }
-            .padding()
-            Text("数値は 1/x の x。実測は今のG数から計算した値で、G数が少ないうちは大きくぶれます。\n出典：ジャグラースペック一覧表（smokefield.info）")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal)
         }
         .navigationTitle(model.label)
         .navigationBarTitleDisplayMode(.inline)
@@ -227,6 +246,11 @@ struct SpecTableView: View {
 
     private static func format(_ value: Double) -> String {
         String(format: "%.1f", value)
+    }
+
+    private static func optional(_ value: Double?, decimals: Int = 1) -> String {
+        guard let value else { return "-" }
+        return String(format: "%.\(decimals)f", value)
     }
 
     private static func observed(_ stats: PlayStats, _ count: Int, decimals: Int = 1) -> String {

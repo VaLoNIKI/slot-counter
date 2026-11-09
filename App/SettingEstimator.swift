@@ -4,7 +4,7 @@ import Foundation
 struct SettingEstimate {
     /// index 0 = 設定1
     let probabilities: [Double]
-    /// 計算に使った項目（"BIG", "REG", "ぶどう"）
+    /// 計算に使った項目（"BIG", "REG", "単独/重複", "ぶどう", "チェリー"）
     let usedMetrics: [String]
 
     var mostLikely: Int {
@@ -24,30 +24,79 @@ struct SettingEstimate {
     }
 }
 
+/// 推測に使う回数
+struct EstimateInput {
+    var games: Int
+    var big: Int
+    var reg: Int
+    /// 重複を区別して記録したボーナス（不明は含めない）
+    var aloneBig: Int
+    var cherryBig: Int
+    var aloneReg: Int
+    var cherryReg: Int
+    var grape: Int
+    /// 小役ボタンで数えたチェリー（ボーナスと重なったものは BIG/REG 側で記録するので、非重複チェリーに当たる）
+    var cherry: Int
+}
+
 /// スペック表の確率から、今の回数がどの設定で起こりやすいかを計算する（ベイズ推定の簡易版）。
 ///
-/// - 1G ごとに「BIG」「REG」「ぶどう」「それ以外」のどれかが起きるとみなした多項分布の尤度を使う
+/// - 1G ごとに「BIG」「REG」「ぶどう」「チェリー」「それ以外」のどれかが起きるとみなした多項分布の尤度を使う
+/// - 単独/重複の内訳が分かるボーナスは、資料の単独BIG・重複BIG・単独REG・重複REG の確率を使う。
+///   判別不能のボーナスは BIG / REG 全体の確率を使う
 /// - 事前確率は設定1〜6すべて同じ（ホールの設定配分は考えない）
-/// - ぶどうは数えている場合（1回以上）だけ使う。数えていないのに0回として扱うと大きく狂うため
-/// - チェリーや単独/重複REGは、スペック表に設定別の値がないので使わない
+/// - ぶどう・チェリーは数えている場合（1回以上）だけ使う。数えていないのに0回として扱うと大きく狂うため
+/// - チェリーは資料に設定差がある機種（マイジャグラーⅥ・Ⅴ、ハッピーVⅢ）だけ使う
 enum SettingEstimator {
-    static func estimate(model: JugglerModel, games: Int, big: Int, reg: Int, grape: Int) -> SettingEstimate? {
-        guard games > 0 else { return nil }
-        let useGrape = grape > 0
+    static func estimate(model: JugglerModel, input: EstimateInput) -> SettingEstimate? {
+        guard input.games > 0 else { return nil }
+        let useGrape = input.grape > 0
+        let useCherry = input.cherry > 0 && model.hasSettingDifference(.cherry)
+        let useBreakdown = model.specs.allSatisfy { $0.aloneBig != nil }
+            && (input.aloneBig + input.cherryBig + input.aloneReg + input.cherryReg) > 0
+        let unknownBig = max(0, input.big - input.aloneBig - input.cherryBig)
+        let unknownReg = max(0, input.reg - input.aloneReg - input.cherryReg)
+
         var used = ["BIG", "REG"]
+        if useBreakdown { used.append("単独/重複") }
         if useGrape { used.append("ぶどう") }
+        if useCherry { used.append("チェリー") }
 
         let logLikelihoods = model.specs.map { spec -> Double in
             let pBig = 1 / spec.big
             let pReg = 1 / spec.reg
-            let pGrape = useGrape ? 1 / spec.grape : 0
-            let counted = big + reg + (useGrape ? grape : 0)
-            let rest = max(0, games - counted)
-            let pRest = max(1e-12, 1 - pBig - pReg - pGrape)
-            var value = Double(big) * log(pBig) + Double(reg) * log(pReg) + Double(rest) * log(pRest)
-            if useGrape {
-                value += Double(grape) * log(pGrape)
+            var value = 0.0
+
+            if useBreakdown,
+               let aloneBig = spec.aloneBig, let cherryBig = spec.cherryBig,
+               let aloneReg = spec.aloneReg, let cherryReg = spec.cherryReg {
+                value += Double(input.aloneBig) * log(1 / aloneBig)
+                value += Double(input.cherryBig) * log(1 / cherryBig)
+                value += Double(unknownBig) * log(1 / aloneBig + 1 / cherryBig)
+                value += Double(input.aloneReg) * log(1 / aloneReg)
+                value += Double(input.cherryReg) * log(1 / cherryReg)
+                value += Double(unknownReg) * log(1 / aloneReg + 1 / cherryReg)
+            } else {
+                value += Double(input.big) * log(pBig) + Double(input.reg) * log(pReg)
             }
+
+            var pCounted = pBig + pReg
+            var counted = input.big + input.reg
+            if useGrape {
+                let pGrape = 1 / spec.grape
+                value += Double(input.grape) * log(pGrape)
+                pCounted += pGrape
+                counted += input.grape
+            }
+            if useCherry, let cherry = spec.cherry {
+                let pCherry = 1 / cherry
+                value += Double(input.cherry) * log(pCherry)
+                pCounted += pCherry
+                counted += input.cherry
+            }
+
+            let rest = max(0, input.games - counted)
+            value += Double(rest) * log(max(1e-12, 1 - pCounted))
             return value
         }
 
@@ -64,12 +113,16 @@ extension PlayStats {
     /// ジャグラーの設定推測（暫定）
     var settingEstimate: SettingEstimate? {
         guard FeatureAccess.isUnlocked(.settingEstimate), let model = jugglerModel else { return nil }
-        return SettingEstimator.estimate(
-            model: model,
+        return SettingEstimator.estimate(model: model, input: EstimateInput(
             games: games,
             big: count(.big),
             reg: count(.reg),
-            grape: count(.grape)
-        )
+            aloneBig: bonusCount(.big, .alone),
+            cherryBig: bonusCount(.big, .cherry),
+            aloneReg: bonusCount(.reg, .alone),
+            cherryReg: bonusCount(.reg, .cherry),
+            grape: count(.grape),
+            cherry: count(.cherry)
+        ))
     }
 }
