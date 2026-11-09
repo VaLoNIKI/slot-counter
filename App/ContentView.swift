@@ -87,10 +87,7 @@ struct ContentView: View {
 
     private var header: some View {
         HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 2) {
-                machineMenu
-                statusLine
-            }
+            machineMenu
             Spacer(minLength: 8)
             if FeatureAccess.isUnlocked(.sessionHistory) {
                 circleButton("clock.arrow.circlepath", label: "履歴") { showHistory = true }
@@ -135,18 +132,23 @@ struct ContentView: View {
                 }
             }
         } label: {
-            HStack(spacing: 6) {
-                Text(machineTitle)
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(Theme.text)
-                    .lineLimit(1)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Theme.subtext)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(machineTitle)
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(Theme.text)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Theme.subtext)
+                }
+                statusLine
             }
-            .frame(minHeight: 28)
+            .frame(minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .accessibilityLabel("機種: \(machineTitle)")
+        .accessibilityHint("タップで台・機種を切り替え")
     }
 
     private var statusLine: some View {
@@ -414,7 +416,7 @@ struct EstimateStrip: View {
                 ForEach(Array(estimate.probabilities.enumerated()), id: \.offset) { index, probability in
                     VStack(spacing: 2) {
                         RoundedRectangle(cornerRadius: 3)
-                            .fill(index + 1 == best ? Theme.led : Theme.barIdle)
+                            .fill(index + 1 == best ? Theme.led : Theme.barMuted)
                             .frame(width: 10, height: 4 + 26 * probability / max(maxProbability, 0.0001))
                         Text("\(index + 1)")
                             .font(.system(size: 9))

@@ -14,6 +14,8 @@ enum Theme {
     static let softText = Color(hex: 0xC9C9D3)
     static let led = Color(hex: 0xFFB020)
     static let barIdle = Color(hex: 0x4A4A57)
+    /// 設定推測の棒（最有力以外）。背景 #17171D に対して 3.5:1 を確保
+    static let barMuted = Color(hex: 0x6E6E7C)
     static let ok = Color(hex: 0x7BE0A0)
 
     /// 上の帯（G数・ボーナス合算・ぶどう合算）の数字。案 B の太い数字

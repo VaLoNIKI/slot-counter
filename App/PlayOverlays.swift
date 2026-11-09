@@ -29,6 +29,9 @@ struct BonusPickerOverlay: View {
             .frame(width: 300)
             .background(Theme.overlayCard, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Theme.border, lineWidth: 1))
+            // VoiceOver で後ろの画面に移らないようにし、2本指こすり（エスケープ）で閉じられるようにする
+            .accessibilityAddTraits(.isModal)
+            .accessibilityAction(.escape, onCancel)
         }
         .transition(.identity)
     }
@@ -96,6 +99,8 @@ struct GamesOverlay: View {
             .background(Theme.overlayCard, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Theme.border, lineWidth: 1))
             .padding(.top, 70)
+            .accessibilityAddTraits(.isModal)
+            .accessibilityAction(.escape, onClose)
         }
         .transition(.identity)
         .onAppear {
