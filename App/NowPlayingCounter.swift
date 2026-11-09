@@ -20,6 +20,8 @@ import UIKit
 // 実験的：音量ボタンでも数える（音量＋ = 次の曲の割り当て、音量− = 前の曲の割り当て）。
 // 音を流している間は AVAudioSession.outputVolume の変化を受け取れる（Apple のフォーラムでの回答）。
 // 背面タップに「音量を上げる／下げる」を割り当てれば、背面タップでも数えられる。
+// アプリを開いているときの音量ボタンは「音量の調整」として扱い、数えない（その音量を新しい元の音量にする）。
+// 数えるのはロック中・画面消灯中・他のアプリ使用中だけ。
 // 数えるたびに、画面に置いた MPVolumeView で音量をユーザーの元の音量に戻す。
 // ただし元の音量が最大（最小）だと「上げる（下げる）」で変化が起きず数えられないので、そのときは1目盛り内側を基準にする。
 // 機能をオフにしたとき・止めたときは、オンにする前の音量にそのまま戻す。
@@ -61,7 +63,7 @@ final class NowPlayingCounter {
     @ObservationIgnored private var volumeObservation: NSKeyValueObservation?
     /// 自分で音量を戻したときの変化を数えないための期限
     @ObservationIgnored private var ignoreVolumeUntil = Date.distantPast
-    /// 機能をオンにしたときのユーザーの音量（オフにしたら戻す）
+    /// ユーザーの音量（オンにした時点の音量。アプリを開いて音量を変えたらその値。オフにしたらこれに戻す）
     @ObservationIgnored private var userVolume: Float?
     /// 数えたあとに戻す音量（ユーザーの音量。端なら1目盛り内側）
     @ObservationIgnored private var baseVolume: Float = 0.5
@@ -293,14 +295,11 @@ final class NowPlayingCounter {
             restoreUserVolume()
             return
         }
-        let current = AVAudioSession.sharedInstance().outputVolume
+        let current = currentSystemVolume()
         if userVolume == nil {
             userVolume = current
         }
-        baseVolume = min(max(current, Self.volumeStep), 1 - Self.volumeStep)
-        if abs(baseVolume - current) > 0.001 {
-            setVolume(baseVolume)
-        }
+        applyUserVolume(current: current)
         volumeObservation = AVAudioSession.sharedInstance().observe(\.outputVolume, options: [.old, .new]) { [weak self] _, change in
             guard let old = change.oldValue, let new = change.newValue else { return }
             Task { @MainActor in
@@ -311,6 +310,12 @@ final class NowPlayingCounter {
 
     private func handleVolumeChange(old: Float, new: Float) {
         guard isRunning, volumeButtonsEnabled, Date() >= ignoreVolumeUntil else { return }
+        if UIApplication.shared.applicationState == .active {
+            // アプリを開いているときは数えず、音量の調整として受け取る
+            userVolume = new
+            applyUserVolume(current: new)
+            return
+        }
         if new > old {
             handle(.next)
         } else if new < old {
@@ -321,7 +326,26 @@ final class NowPlayingCounter {
         setVolume(baseVolume)
     }
 
-    /// オンにする前の音量に戻す（オフにしたとき・止めたとき）
+    /// 数えたあとに戻す音量をユーザーの音量から決める。最大・最小だと「上げる／下げる」で
+    /// 変化が起きず数えられないので、そのときだけ1目盛り内側にする
+    private func applyUserVolume(current: Float) {
+        guard let userVolume else { return }
+        baseVolume = min(max(userVolume, Self.volumeStep), 1 - Self.volumeStep)
+        if abs(baseVolume - current) > 0.001 {
+            setVolume(baseVolume)
+        }
+    }
+
+    /// 今の本体の音量。iOS 18 以降は outputVolume が裏で変わった音量を反映しないことがあるので、
+    /// 画面に置いた音量スライダー（MPVolumeView）の値を優先する
+    private func currentSystemVolume() -> Float {
+        if let slider = volumeView?.subviews.compactMap({ $0 as? UISlider }).first {
+            return slider.value
+        }
+        return AVAudioSession.sharedInstance().outputVolume
+    }
+
+    /// ユーザーの音量に戻す（オフにしたとき・止めたとき）
     private func restoreUserVolume() {
         guard let userVolume else { return }
         self.userVolume = nil
