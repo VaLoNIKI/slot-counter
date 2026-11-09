@@ -13,5 +13,6 @@ struct SlotCounterWidgetBundle: WidgetBundle {
         BigControl()
         RegControl()
         UndoControl()
+        LockTestControl()
     }
 }
